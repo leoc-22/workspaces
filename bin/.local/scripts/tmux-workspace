@@ -4,8 +4,6 @@ set -euo pipefail
 
 DEFAULT_PROJECT_ROOT="$HOME/Developer"
 DEFAULT_WINDOW_NAMES=(editor runtime ops)
-WINDOW_CONFIG_FILE=".proj-windows"
-SESSION_LAYOUT_FILE=".proj-session"
 DEFAULT_YAML_LAYOUT_FILE=".proj/layout.yaml"
 DEFAULT_YAML_LAYOUT_FILE_ALT=".proj/layout.yml"
 YAML_LAYOUTS_DIR=".proj/layouts"
@@ -16,37 +14,40 @@ SPEC_TARGET=""
 SPEC_COMMAND=""
 
 INPUT_ARGS=()
-WINDOW_NAMES=()
 TARGETS=()
 COMMANDS=()
 
 usage() {
   cat <<'EOF'
-Usage: proj [options] [project-name-or-directory ...]
+Usage: tmux-workspace [options] [project-name-or-directory ...]
 
 Options:
   -l, --layout <name>   Use .proj/layouts/<name>.yaml (or .yml) in target
-  -f, --file <path>     Use explicit YAML layout file path
+      --layout <file>   Use exact YAML file under .proj/layouts in target
+      --layout -f <path>
+  -f, --file <path>     Use explicit YAML layout file path (alias)
   -h, --help            Show this help
 
 Examples:
-  proj
-  proj my-app
-  proj ../shared-lib
-  proj a b c
-  proj "a::pnpm dev" "b::go test ./..."
-  proj --layout dev my-workspace
-  proj --file ~/Developer/layouts/cow.yaml
+  tmux-workspace
+  tmux-workspace my-app
+  tmux-workspace ../shared-lib
+  tmux-workspace a b c
+  tmux-workspace "a::pnpm dev" "b::go test ./..."
+  tmux-workspace --layout dev my-workspace
+  tmux-workspace --layout dev.yaml my-workspace
+  tmux-workspace --layout -f ~/Developer/layouts/cow.yaml
+  tmux-workspace --file ~/Developer/layouts/cow.yaml
 
 Notes:
   - No args: opens an fzf picker when available, otherwise uses current dir.
-  - Single target: YAML layout, .proj-session, .proj-windows, or defaults.
+  - Single target: YAML layout or default windows.
   - Multiple targets: one window per target in one tmux session.
 EOF
 }
 
 fail() {
-  printf 'proj: %s\n' "$1" >&2
+  printf 'tmux-workspace: %s\n' "$1" >&2
   exit 1
 }
 
@@ -111,8 +112,17 @@ parse_args() {
         ;;
       -l|--layout)
         [[ $# -lt 2 ]] && fail "missing value for $1"
-        LAYOUT_NAME="$(trim "$2")"
-        shift 2
+        case "$2" in
+          -f|--file)
+            [[ $# -lt 3 ]] && fail "missing value for --layout $2"
+            LAYOUT_FILE_ARG="$(trim "$3")"
+            shift 3
+            ;;
+          *)
+            LAYOUT_NAME="$(trim "$2")"
+            shift 2
+            ;;
+        esac
         ;;
       --layout=*)
         LAYOUT_NAME="$(trim "${1#*=}")"
@@ -211,7 +221,7 @@ collect_project_candidates() {
 
 select_with_fzf() {
   local selection
-  selection="$(collect_project_candidates | fzf --prompt='proj> ' --height=40% --layout=reverse --border || true)"
+  selection="$(collect_project_candidates | fzf --prompt='workspace> ' --height=40% --layout=reverse --border || true)"
   if [[ -n "$selection" ]]; then
     printf '%s\n' "$selection"
   fi
@@ -350,6 +360,7 @@ resolve_layout_file_arg() {
 resolve_yaml_layout_file() {
   local target_dir="$1"
   local candidate
+  local layouts_dir
 
   if [[ -n "$LAYOUT_FILE_ARG" ]]; then
     resolve_layout_file_arg "$target_dir" "$LAYOUT_FILE_ARG"
@@ -357,19 +368,27 @@ resolve_yaml_layout_file() {
   fi
 
   if [[ -n "$LAYOUT_NAME" ]]; then
-    candidate="$target_dir/$YAML_LAYOUTS_DIR/$LAYOUT_NAME.yaml"
+    layouts_dir="$target_dir/$YAML_LAYOUTS_DIR"
+
+    candidate="$layouts_dir/$LAYOUT_NAME"
     if [[ -f "$candidate" ]]; then
       canonical_file "$candidate"
       return
     fi
 
-    candidate="$target_dir/$YAML_LAYOUTS_DIR/$LAYOUT_NAME.yml"
+    candidate="$layouts_dir/$LAYOUT_NAME.yaml"
     if [[ -f "$candidate" ]]; then
       canonical_file "$candidate"
       return
     fi
 
-    fail "layout '$LAYOUT_NAME' not found under $target_dir/$YAML_LAYOUTS_DIR"
+    candidate="$layouts_dir/$LAYOUT_NAME.yml"
+    if [[ -f "$candidate" ]]; then
+      canonical_file "$candidate"
+      return
+    fi
+
+    fail "layout '$LAYOUT_NAME' not found under $layouts_dir"
   fi
 
   candidate="$target_dir/$DEFAULT_YAML_LAYOUT_FILE"
@@ -387,107 +406,17 @@ resolve_yaml_layout_file() {
   printf '\n'
 }
 
-load_window_names() {
-  local target_dir="$1"
-  local config_path="$target_dir/$WINDOW_CONFIG_FILE"
-  local line
-
-  WINDOW_NAMES=()
-
-  if [[ -f "$config_path" ]]; then
-    while IFS= read -r line || [[ -n "$line" ]]; do
-      line="$(trim "$line")"
-      if [[ -z "$line" || "$line" == \#* ]]; then
-        continue
-      fi
-      WINDOW_NAMES+=("$line")
-    done <"$config_path"
-  fi
-
-  if [[ ${#WINDOW_NAMES[@]} -eq 0 ]]; then
-    WINDOW_NAMES=("${DEFAULT_WINDOW_NAMES[@]}")
-  fi
-}
-
-create_session_from_windows() {
+create_session_from_default_windows() {
   local session_name="$1"
   local target_dir="$2"
+  local -a window_names=("${DEFAULT_WINDOW_NAMES[@]}")
   local i
 
-  load_window_names "$target_dir"
-  tmux new-session -d -s "$session_name" -n "${WINDOW_NAMES[0]}" -c "$target_dir"
+  tmux new-session -d -s "$session_name" -n "${window_names[0]}" -c "$target_dir"
 
-  for ((i = 1; i < ${#WINDOW_NAMES[@]}; i++)); do
-    tmux new-window -t "$session_name:" -n "${WINDOW_NAMES[$i]}" -c "$target_dir"
+  for ((i = 1; i < ${#window_names[@]}; i++)); do
+    tmux new-window -t "$session_name:" -n "${window_names[$i]}" -c "$target_dir"
   done
-
-  tmux select-window -t "$session_name:1"
-}
-
-create_session_from_legacy_layout_or_windows() {
-  local session_name="$1"
-  local target_dir="$2"
-  local layout_path="$target_dir/$SESSION_LAYOUT_FILE"
-  local line
-  local -a columns=()
-  local -a split_commands=()
-  local name
-  local raw_dir
-  local command
-  local resolved_dir
-  local created=0
-  local window_index=1
-  local col
-  local split_cmd
-
-  if [[ ! -f "$layout_path" ]]; then
-    create_session_from_windows "$session_name" "$target_dir"
-    return
-  fi
-
-  while IFS= read -r line || [[ -n "$line" ]]; do
-    line="$(trim "$line")"
-    if [[ -z "$line" || "$line" == \#* ]]; then
-      continue
-    fi
-
-    IFS='|' read -r -a columns <<<"$line"
-    name="$(trim "${columns[0]:-}")"
-    raw_dir="$(trim "${columns[1]:-}")"
-    command="$(trim "${columns[2]:-}")"
-    split_commands=()
-
-    if [[ ${#columns[@]} -gt 3 ]]; then
-      for ((col = 3; col < ${#columns[@]}; col++)); do
-        split_cmd="$(trim "${columns[$col]}")"
-        if [[ -n "$split_cmd" ]]; then
-          split_commands+=("$split_cmd")
-        fi
-      done
-    fi
-
-    if [[ -z "$name" ]]; then
-      fail "invalid layout entry in $layout_path: missing window name"
-    fi
-
-    resolved_dir="$(resolve_layout_dir "$target_dir" "$raw_dir")"
-
-    if [[ $created -eq 0 ]]; then
-      tmux new-session -d -s "$session_name" -n "$name" -c "$resolved_dir"
-      created=1
-    else
-      tmux new-window -t "$session_name:" -n "$name" -c "$resolved_dir"
-    fi
-
-    run_window_command "$session_name:$window_index" "$command"
-    run_split_panes "$session_name:$window_index" "$resolved_dir" "${split_commands[@]}"
-    window_index=$((window_index + 1))
-  done <"$layout_path"
-
-  if [[ $created -eq 0 ]]; then
-    create_session_from_windows "$session_name" "$target_dir"
-    return
-  fi
 
   tmux select-window -t "$session_name:1"
 }
@@ -772,7 +701,7 @@ if ! tmux has-session -t "$session_name" 2>/dev/null; then
   elif [[ -n "$yaml_layout_file" ]]; then
     create_session_from_yaml_layout "$session_name" "${TARGETS[0]}" "$yaml_layout_file"
   else
-    create_session_from_legacy_layout_or_windows "$session_name" "${TARGETS[0]}"
+    create_session_from_default_windows "$session_name" "${TARGETS[0]}"
   fi
 fi
 

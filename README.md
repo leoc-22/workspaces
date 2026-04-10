@@ -1,15 +1,14 @@
 # tmux workflow
 
-`proj` is a tmux launcher in a Primeagen-style script path.
+`tmux-workspace` is a tmux launcher in a Primeagen-style script path.
 
 ## Install
 
 Commands:
 
-- `proj`
-- `pj` (short alias command)
+- `tmux-workspace`
 
-Both live in `bin/.local/scripts`.
+The command lives in `bin/.local/scripts`.
 
 Fish (current shell):
 
@@ -26,19 +25,27 @@ fish_add_path /Users/leoc/Developer/tmux-workflow/bin/.local/scripts
 ## Usage
 
 ```bash
-pj
-pj my-app
-pj ../shared-lib
-pj a b c
-pj "a::pnpm dev" "b::go test ./..."
-pj --layout dev my-workspace
-pj --file ~/Developer/layouts/cow.yaml
+tmux-workspace
+tmux-workspace my-app
+tmux-workspace ../shared-lib
+tmux-workspace a b c
+tmux-workspace "a::pnpm dev" "b::go test ./..."
+tmux-workspace --layout dev my-workspace
+tmux-workspace --layout dev.yaml my-workspace
+tmux-workspace --layout -f ~/Developer/layouts/cow.yaml
+tmux-workspace --file ~/Developer/layouts/cow.yaml
 ```
 
 CLI options:
 
 - `--layout <name>`: use `.proj/layouts/<name>.yaml` (or `.yml`) in the target directory
-- `--file <path>`: use a specific YAML file path
+- `--layout <file>`: use an exact YAML file under `.proj/layouts` (for example `dev.yaml`)
+- `--layout -f <path>` or `--file <path>`: use a specific YAML file path
+- `-h`, `--help`: show help
+
+Help shortcuts:
+
+- `tmux-workspace --help`
 
 - No args: uses `fzf` picker when available, else current directory
 - Multiple targets: one session, one window per target
@@ -120,21 +127,10 @@ windows:
 
 Selection order in single-target mode:
 
-1. `--file <path>`
-2. `--layout <name>`
+1. `--layout -f <path>` or `--file <path>`
+2. `--layout <name|file>`
 3. `.proj/layout.yaml` or `.proj/layout.yml`
-4. legacy `.proj-session`
-5. legacy `.proj-windows`
-6. built-in default windows (`editor`, `runtime`, `ops`)
-
-## Legacy text layouts
-
-Still supported for compatibility:
-
-- `.proj-session`
-- `.proj-windows`
-
-If YAML is present/selected, YAML is used first.
+4. built-in default windows (`editor`, `runtime`, `ops`)
 
 ## Requirements
 
