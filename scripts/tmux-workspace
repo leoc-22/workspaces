@@ -4,45 +4,36 @@ set -euo pipefail
 
 DEFAULT_PROJECT_ROOT="$HOME/Developer"
 DEFAULT_WINDOW_NAMES=(editor runtime ops)
-DEFAULT_YAML_LAYOUT_FILE=".proj/layout.yaml"
-DEFAULT_YAML_LAYOUT_FILE_ALT=".proj/layout.yml"
-YAML_LAYOUTS_DIR=".proj/layouts"
+DEFAULT_YAML_LAYOUT_FILE=".workspace/layout.yaml"
+DEFAULT_YAML_LAYOUT_FILE_ALT=".workspace/layout.yml"
+GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspace/layouts"
 
 LAYOUT_NAME=""
 LAYOUT_FILE_ARG=""
 SPEC_TARGET=""
-SPEC_COMMAND=""
 
-INPUT_ARGS=()
-TARGETS=()
-COMMANDS=()
+declare -a INPUT_ARGS=()
 
 usage() {
   cat <<'EOF'
-Usage: tmux-workspace [options] [project-name-or-directory ...]
+Usage: tmux-workspace [options] [project-name-or-directory]
 
 Options:
-  -l, --layout <name>   Use .proj/layouts/<name>.yaml (or .yml) in target
-      --layout <file>   Use exact YAML file under .proj/layouts in target
-      --layout -f <path>
-  -f, --file <path>     Use explicit YAML layout file path (alias)
+  -l, --layout <name>   Use ~/.config/tmux-workspace/layouts/<name>.yaml (or .yml)
+  -f, --file <path>     Use explicit YAML layout file path
   -h, --help            Show this help
 
 Examples:
   tmux-workspace
   tmux-workspace my-app
   tmux-workspace ../shared-lib
-  tmux-workspace a b c
-  tmux-workspace "a::pnpm dev" "b::go test ./..."
   tmux-workspace --layout dev my-workspace
-  tmux-workspace --layout dev.yaml my-workspace
-  tmux-workspace --layout -f ~/Developer/layouts/cow.yaml
   tmux-workspace --file ~/Developer/layouts/cow.yaml
 
 Notes:
-  - No args: opens an fzf picker when available, otherwise uses current dir.
+  - No args (interactive): opens an fzf picker; cancel exits.
+  - No args (non-interactive): uses current dir.
   - Single target: YAML layout or default windows.
-  - Multiple targets: one window per target in one tmux session.
 EOF
 }
 
@@ -112,29 +103,24 @@ parse_args() {
         ;;
       -l|--layout)
         [[ $# -lt 2 ]] && fail "missing value for $1"
-        case "$2" in
-          -f|--file)
-            [[ $# -lt 3 ]] && fail "missing value for --layout $2"
-            LAYOUT_FILE_ARG="$(trim "$3")"
-            shift 3
-            ;;
-          *)
-            LAYOUT_NAME="$(trim "$2")"
-            shift 2
-            ;;
-        esac
+        LAYOUT_NAME="$(trim "$2")"
+        [[ -z "$LAYOUT_NAME" ]] && fail "missing value for --layout"
+        shift 2
         ;;
       --layout=*)
         LAYOUT_NAME="$(trim "${1#*=}")"
+        [[ -z "$LAYOUT_NAME" ]] && fail "missing value for --layout"
         shift
         ;;
       -f|--file)
         [[ $# -lt 2 ]] && fail "missing value for $1"
         LAYOUT_FILE_ARG="$(trim "$2")"
+        [[ -z "$LAYOUT_FILE_ARG" ]] && fail "missing value for --file"
         shift 2
         ;;
       --file=*)
         LAYOUT_FILE_ARG="$(trim "${1#*=}")"
+        [[ -z "$LAYOUT_FILE_ARG" ]] && fail "missing value for --file"
         shift
         ;;
       --)
@@ -162,6 +148,14 @@ parse_args() {
     fail "invalid --layout value"
   fi
 
+  if [[ -n "$LAYOUT_NAME" && "$LAYOUT_NAME" == -* ]]; then
+    fail "invalid --layout value: $LAYOUT_NAME"
+  fi
+
+  if [[ -n "$LAYOUT_NAME" && "$LAYOUT_NAME" == */* ]]; then
+    fail "--layout accepts a layout name only; use --file for paths"
+  fi
+
   if [[ -n "$LAYOUT_FILE_ARG" && "$LAYOUT_FILE_ARG" == "null" ]]; then
     fail "invalid --file value"
   fi
@@ -169,6 +163,7 @@ parse_args() {
 
 resolve_target() {
   local input="$1"
+  local zoxide_target
 
   if [[ -z "$input" ]]; then
     printf '%s\n' "$PWD"
@@ -185,6 +180,14 @@ resolve_target() {
   if [[ -d "$input" ]]; then
     printf '%s\n' "$input"
     return
+  fi
+
+  if command -v zoxide >/dev/null 2>&1; then
+    zoxide_target="$(zoxide query -- "$input" 2>/dev/null || true)"
+    if [[ -n "$zoxide_target" && -d "$zoxide_target" ]]; then
+      printf '%s\n' "$zoxide_target"
+      return
+    fi
   fi
 
   printf '%s\n' "$DEFAULT_PROJECT_ROOT/$input"
@@ -230,20 +233,11 @@ select_with_fzf() {
 parse_target_spec() {
   local input="$1"
 
-  SPEC_TARGET="$input"
-  SPEC_COMMAND=""
-
   if [[ "$input" == *"::"* ]]; then
-    SPEC_TARGET="$(trim "${input%%::*}")"
-    SPEC_COMMAND="${input#*::}"
-
-    if [[ -z "$SPEC_TARGET" ]]; then
-      fail "invalid target spec: $input"
-    fi
-    return
+    fail "inline target commands are not supported"
   fi
 
-  SPEC_TARGET="$(trim "$SPEC_TARGET")"
+  SPEC_TARGET="$(trim "$input")"
 }
 
 run_window_command() {
@@ -361,6 +355,7 @@ resolve_yaml_layout_file() {
   local target_dir="$1"
   local candidate
   local layouts_dir
+  local layout_name
 
   if [[ -n "$LAYOUT_FILE_ARG" ]]; then
     resolve_layout_file_arg "$target_dir" "$LAYOUT_FILE_ARG"
@@ -368,21 +363,25 @@ resolve_yaml_layout_file() {
   fi
 
   if [[ -n "$LAYOUT_NAME" ]]; then
-    layouts_dir="$target_dir/$YAML_LAYOUTS_DIR"
+    layouts_dir="$GLOBAL_YAML_LAYOUTS_DIR"
+    layout_name="$LAYOUT_NAME"
 
-    candidate="$layouts_dir/$LAYOUT_NAME"
+    case "$layout_name" in
+      *.yaml)
+        layout_name="${layout_name%.yaml}"
+        ;;
+      *.yml)
+        layout_name="${layout_name%.yml}"
+        ;;
+    esac
+
+    candidate="$layouts_dir/$layout_name.yaml"
     if [[ -f "$candidate" ]]; then
       canonical_file "$candidate"
       return
     fi
 
-    candidate="$layouts_dir/$LAYOUT_NAME.yaml"
-    if [[ -f "$candidate" ]]; then
-      canonical_file "$candidate"
-      return
-    fi
-
-    candidate="$layouts_dir/$LAYOUT_NAME.yml"
+    candidate="$layouts_dir/$layout_name.yml"
     if [[ -f "$candidate" ]]; then
       canonical_file "$candidate"
       return
@@ -639,69 +638,56 @@ if ! command -v tmux >/dev/null 2>&1; then
   fail "tmux is not installed or not on PATH"
 fi
 
-inputs=("${INPUT_ARGS[@]}")
+inputs=("${INPUT_ARGS[@]-}")
+if [[ ${#inputs[@]} -eq 1 && -z "${inputs[0]}" ]]; then
+  inputs=()
+fi
 if [[ ${#inputs[@]} -eq 0 ]]; then
-  inputs=("")
-  if [[ -t 0 && -t 1 ]] && command -v fzf >/dev/null 2>&1; then
+  if [[ -t 0 && -t 1 ]]; then
+    if ! command -v fzf >/dev/null 2>&1; then
+      fail "fzf is required when no target is provided"
+    fi
+
     selected="$(select_with_fzf)"
-    if [[ -n "$selected" ]]; then
-      inputs=("$selected")
+    if [[ -z "$selected" ]]; then
+      exit 0
     fi
+
+    inputs=("$selected")
+  else
+    inputs=("")
   fi
 fi
 
-has_inline_commands=0
-TARGETS=()
-COMMANDS=()
-
-for input in "${inputs[@]}"; do
-  parse_target_spec "$input"
-
-  if [[ "$input" == *"::"* ]]; then
-    has_inline_commands=1
-  fi
-
-  target="$(resolve_target "$SPEC_TARGET")"
-  if [[ ! -d "$target" ]]; then
-    fail "project directory not found: $target"
-  fi
-
-  target="$(cd "$target" && pwd -P)"
-  TARGETS+=("$target")
-  COMMANDS+=("$SPEC_COMMAND")
-done
-
-if [[ ${#TARGETS[@]} -gt 1 || $has_inline_commands -eq 1 ]]; then
-  if [[ -n "$LAYOUT_NAME" || -n "$LAYOUT_FILE_ARG" ]]; then
-    fail "--layout/--file only work with a single target and no inline target commands"
-  fi
+if [[ ${#inputs[@]} -gt 1 ]]; then
+  fail "only one target is supported"
 fi
 
-yaml_layout_file=""
-if [[ ${#TARGETS[@]} -eq 1 && $has_inline_commands -eq 0 ]]; then
-  yaml_layout_file="$(resolve_yaml_layout_file "${TARGETS[0]}")"
+parse_target_spec "${inputs[0]}"
+
+target="$(resolve_target "$SPEC_TARGET")"
+if [[ ! -d "$target" ]]; then
+  fail "project directory not found: $target"
 fi
 
-if [[ ${#TARGETS[@]} -gt 1 ]]; then
-  session_name="$(session_name_for_multi_targets "${TARGETS[@]}")"
-else
-  session_name="$(session_name_for_target "${TARGETS[0]}")"
+target="$(cd "$target" && pwd -P)"
 
-  if [[ -n "$yaml_layout_file" ]]; then
-    session_override="$(yaml_session_name_override "$yaml_layout_file")"
-    if [[ -n "$session_override" ]]; then
-      session_name="$session_override"
-    fi
+yaml_layout_file="$(resolve_yaml_layout_file "$target")"
+
+session_name="$(session_name_for_target "$target")"
+
+if [[ -n "$yaml_layout_file" ]]; then
+  session_override="$(yaml_session_name_override "$yaml_layout_file")"
+  if [[ -n "$session_override" ]]; then
+    session_name="$session_override"
   fi
 fi
 
 if ! tmux has-session -t "$session_name" 2>/dev/null; then
-  if [[ ${#TARGETS[@]} -gt 1 || $has_inline_commands -eq 1 ]]; then
-    create_session_from_targets "$session_name"
-  elif [[ -n "$yaml_layout_file" ]]; then
-    create_session_from_yaml_layout "$session_name" "${TARGETS[0]}" "$yaml_layout_file"
+  if [[ -n "$yaml_layout_file" ]]; then
+    create_session_from_yaml_layout "$session_name" "$target" "$yaml_layout_file"
   else
-    create_session_from_default_windows "$session_name" "${TARGETS[0]}"
+    create_session_from_default_windows "$session_name" "$target"
   fi
 fi
 
