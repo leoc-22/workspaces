@@ -8,55 +8,76 @@ Commands:
 
 - `tmux-workspace`
 
-The command lives in `bin/.local/scripts`.
+The command lives in `scripts`.
 
 Fish (current shell):
 
 ```fish
-set -gx PATH /Users/leoc/Developer/tmux-workflow/bin/.local/scripts $PATH
+set -gx PATH /Users/leoc/Developer/tmux-workflow/scripts $PATH
 ```
 
 Fish (persist):
 
 ```fish
-fish_add_path /Users/leoc/Developer/tmux-workflow/bin/.local/scripts
+fish_add_path /Users/leoc/Developer/tmux-workflow/scripts
 ```
+
+Check command path:
+
+```fish
+type -a tmux-workspace
+```
+
+## Uninstall (Fish)
+
+Remove persisted PATH entry:
+
+```fish
+set -l target /Users/leoc/Developer/tmux-workflow/scripts
+set -l i (contains -i -- $target $fish_user_paths)
+if test -n "$i"
+    set -e fish_user_paths[$i]
+end
+```
+
+Remove from current shell PATH too:
+
+```fish
+set -gx PATH (string match -v -- $target $PATH)
+```
+
+If you manually added `set -gx PATH .../scripts $PATH` in `~/.config/fish/config.fish`, remove that line.
 
 ## Usage
 
 ```bash
 tmux-workspace
 tmux-workspace my-app
-tmux-workspace ../shared-lib
-tmux-workspace a b c
-tmux-workspace "a::pnpm dev" "b::go test ./..."
 tmux-workspace --layout dev my-workspace
-tmux-workspace --layout dev.yaml my-workspace
-tmux-workspace --layout -f ~/Developer/layouts/cow.yaml
 tmux-workspace --file ~/Developer/layouts/cow.yaml
 ```
 
 CLI options:
 
-- `--layout <name>`: use `.proj/layouts/<name>.yaml` (or `.yml`) in the target directory
-- `--layout <file>`: use an exact YAML file under `.proj/layouts` (for example `dev.yaml`)
-- `--layout -f <path>` or `--file <path>`: use a specific YAML file path
+- `--layout <name>`: use `~/.config/tmux-workspace/layouts/<name>.yaml` (or `.yml`)
+- `--file <path>`: use a specific YAML file path
 - `-h`, `--help`: show help
 
 Help shortcuts:
 
 - `tmux-workspace --help`
 
-- No args: uses `fzf` picker when available, else current directory
-- Multiple targets: one session, one window per target
-- Inline `target::command`: runs once when session is first created
+- No args (interactive): opens `fzf`; cancel exits
+- No args (non-interactive): uses current directory
+- One target per command invocation
 - `--layout` / `--file` are for single-target mode only
 
 Target resolution order:
 
 1. explicit path (`.`, `..`, `/...`, `~/...`)
-2. existing local directory
-3. fallback to `~/Developer/<name>`
+2. existing local directory in current working directory
+3. `zoxide` match (`zoxide query <name>`) when available
+4. fallback to `~/Developer/<name>`
 
 ## YAML layout (recommended)
 
@@ -64,22 +85,24 @@ YAML supports named layouts, windows, startup commands, and panes.
 
 Default auto-detected file (single target):
 
-- `.proj/layout.yaml` (or `.proj/layout.yml`)
+- `.workspace/layout.yaml` (or `.workspace/layout.yml`)
 
 Named layout file:
 
-- `.proj/layouts/<name>.yaml` (or `.yml`), used via `--layout <name>`
+- `~/.config/tmux-workspace/layouts/<name>.yaml` (or `.yml`), used via `--layout <name>`
 
-Recommended project structure for multiple layouts:
+Recommended structure:
 
 ```text
+~/.config/tmux-workspace/
+  layouts/
+    dev.yaml
+    debug.yaml
+    staging.yaml
+
 my-workspace/
-  .proj/
+  .workspace/
     layout.yaml
-    layouts/
-      dev.yaml
-      debug.yaml
-      staging.yaml
 ```
 
 YAML schema:
@@ -107,6 +130,8 @@ windows:
 
 Cow/cob/cos example:
 
+See `examples/layout.yaml` for this example in the repo.
+
 ```yaml
 session:
   name: cow-stack
@@ -127,13 +152,39 @@ windows:
 
 Selection order in single-target mode:
 
-1. `--layout -f <path>` or `--file <path>`
-2. `--layout <name|file>`
-3. `.proj/layout.yaml` or `.proj/layout.yml`
+1. `--file <path>`
+2. `--layout <name>`
+3. `.workspace/layout.yaml` or `.workspace/layout.yml`
 4. built-in default windows (`editor`, `runtime`, `ops`)
 
-## Requirements
+## External Dependencies
 
-- `tmux` (required)
-- `yq` (required for YAML layouts)
-- `fzf` (optional for no-arg picker)
+- `tmux` (required): session/window management
+- `yq` (required for YAML layouts): parse `layout.yaml` and named layouts
+- `fzf` (required for interactive no-arg mode): picker for `tmux-workspace` with no arguments
+- `zoxide` (optional): smart directory match for `tmux-workspace <name>`
+
+Install (macOS/Homebrew):
+
+```bash
+brew install tmux yq fzf
+```
+
+Optional (`zoxide`):
+
+```bash
+brew install zoxide
+```
+
+Install (Ubuntu/Debian):
+
+```bash
+sudo apt update
+sudo apt install -y tmux yq fzf
+```
+
+Optional (`zoxide`):
+
+```bash
+sudo apt install -y zoxide
+```
