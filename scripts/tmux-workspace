@@ -33,6 +33,7 @@ Examples:
 Notes:
   - No args (interactive): opens an fzf picker; cancel exits.
   - No args (non-interactive): uses current dir.
+  - With --layout/--file and no target: uses current dir (no fzf).
   - Single target: YAML layout or default windows.
 EOF
 }
@@ -643,7 +644,9 @@ if [[ ${#inputs[@]} -eq 1 && -z "${inputs[0]}" ]]; then
   inputs=()
 fi
 if [[ ${#inputs[@]} -eq 0 ]]; then
-  if [[ -t 0 && -t 1 ]]; then
+  if [[ -n "$LAYOUT_NAME" || -n "$LAYOUT_FILE_ARG" ]]; then
+    inputs=("")
+  elif [[ -t 0 && -t 1 ]]; then
     if ! command -v fzf >/dev/null 2>&1; then
       fail "fzf is required when no target is provided"
     fi

@@ -69,6 +69,7 @@ Help shortcuts:
 
 - No args (interactive): opens `fzf`; cancel exits
 - No args (non-interactive): uses current directory
+- With `--layout`/`--file` and no target: uses current directory (skips `fzf`)
 - One target per command invocation
 - `--layout` / `--file` are for single-target mode only
 
@@ -187,4 +188,12 @@ Optional (`zoxide`):
 
 ```bash
 sudo apt install -y zoxide
+```
+
+## Regression Test
+
+Run the tiny shell regression harness:
+
+```bash
+bash tests/tmux-workspace-regression.sh
 ```
