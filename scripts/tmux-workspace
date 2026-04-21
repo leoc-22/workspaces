@@ -6,7 +6,7 @@ DEFAULT_PROJECT_ROOT="$HOME/Developer"
 DEFAULT_WINDOW_NAMES=(editor runtime ops)
 DEFAULT_YAML_LAYOUT_FILE=".workspace/layout.yaml"
 DEFAULT_YAML_LAYOUT_FILE_ALT=".workspace/layout.yml"
-GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspace/layouts"
+GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspaces/layouts"
 
 LAYOUT_NAME=""
 LAYOUT_FILE_ARG=""
@@ -19,7 +19,7 @@ usage() {
 Usage: tmux-workspace [options] [project-name-or-directory]
 
 Options:
-  -l, --layout <name>   Use ~/.config/tmux-workspace/layouts/<name>.yaml (or .yml)
+  -l, --layout <name>   Use ~/.config/tmux-workspaces/layouts/<name>.yaml (or .yml)
   -f, --file <path>     Use explicit YAML layout file path
   -h, --help            Show this help
 

@@ -59,7 +59,7 @@ tmux-workspace --file ~/Developer/layouts/cow.yaml
 
 CLI options:
 
-- `--layout <name>`: use `~/.config/tmux-workspace/layouts/<name>.yaml` (or `.yml`)
+- `--layout <name>`: use `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`)
 - `--file <path>`: use a specific YAML file path
 - `-h`, `--help`: show help
 
@@ -90,12 +90,12 @@ Default auto-detected file (single target):
 
 Named layout file:
 
-- `~/.config/tmux-workspace/layouts/<name>.yaml` (or `.yml`), used via `--layout <name>`
+- `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`), used via `--layout <name>`
 
 Recommended structure:
 
 ```text
-~/.config/tmux-workspace/
+~/.config/tmux-workspaces/
   layouts/
     dev.yaml
     debug.yaml
