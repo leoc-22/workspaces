@@ -52,7 +52,7 @@ If you manually added `set -gx PATH .../scripts $PATH` in `~/.config/fish/config
 tmux-workspaces
 tmux-workspaces my-app
 tmux-workspaces ../shared-lib
-tmux-workspaces --layout dev my-workspace
+tmux-workspaces --layout dev
 tmux-workspaces --layout --file ~/layouts/cow.yaml
 tmux-workspaces --help
 ```
@@ -66,8 +66,8 @@ tmux-workspaces --help
 | `tmux-workspaces` | Interactive picker | Opens `fzf` when running in an interactive terminal. Cancel exits without error. |
 | `tmux-workspaces` | Current directory | In non-interactive use, uses the current directory. |
 | `tmux-workspaces <target>` | Target workspace | Resolves `<target>` to a directory, then uses project-local layout if present, otherwise default windows. |
-| `tmux-workspaces --layout <name> [target]` | Named layout | Loads `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. If no target is given, uses the current directory. |
-| `tmux-workspaces --layout --file <path> [target]` | Explicit layout file | Loads the YAML file at `<path>` from anywhere. If no target is given, uses the current directory. |
+| `tmux-workspaces --layout <name> [target]` | Named layout | Loads `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. If no target is given, uses `session.dir` from the layout when present, otherwise the current directory. |
+| `tmux-workspaces --layout --file <path> [target]` | Explicit layout file | Loads the YAML file at `<path>` from anywhere. If no target is given, uses `session.dir` from the layout when present, otherwise the current directory. |
 | `tmux-workspaces --help` | Help | Prints command help. |
 
 ## Options
@@ -81,7 +81,8 @@ tmux-workspaces --help
 Notes:
 
 - `--file <path>` by itself is not a valid mode; use `--layout --file <path>`.
-- `--layout` modes skip `fzf` when no target is provided and use the current directory instead.
+- `--layout` modes skip `fzf` when no target is provided and use `session.dir` from the layout when present, otherwise the current directory.
+- A target passed on the command line overrides `session.dir`.
 - Only one target is supported per command invocation.
 
 ## Resolution Order
@@ -98,7 +99,7 @@ In single-target mode, the layout is selected in this order:
 1. `--layout --file <path>`: explicit YAML file from anywhere
 2. `--layout <name>`: global named layout from `~/.config/tmux-workspaces/layouts/`
 3. auto-detect project-local `.tmux-workspaces/layout.yaml` or `.tmux-workspaces/layout.yml` in the target directory
-4. built-in default windows (`editor`, `runtime`, `ops`)
+4. built-in default windows (`editor`, `shell`, `runtime`)
 
 ## YAML layout (recommended)
 
@@ -133,24 +134,46 @@ YAML schema:
 
 ```yaml
 session:
-  name: optional-session-name
+  name: optional-session-name       # optional
+  dir: ~/Developer/my-workspace     # optional; target directory for the session
+  path: ~/Developer/my-workspace    # optional alias for session.dir
 windows:
-  - name: window-name
-    dir: ~/Developer/some-repo
-    command: pnpm dev
+  - name: window-name               # required
+    dir: ~/Developer/some-repo      # optional; defaults to target directory
+    path: ~/Developer/some-repo     # optional alias for dir
+    command: pnpm dev               # optional
+    run: pnpm dev                   # optional alias for command
     panes:
-      - split: h
-        command: mysql ...
-      - split: v
+      - mysql ...                   # string form; split defaults to h
+      - split: h                    # optional; h/top-bottom or v/left-right
         command: tail -f log.txt
+      - split: v
+        run: pnpm test              # run is an alias for command
 ```
 
-- `session.name` optional; when set it overrides derived tmux session name
-- `windows[].name` required
-- `windows[].dir` optional (defaults to target dir)
-- `windows[].command` optional
-- `panes` optional
-- `split` values: `h` (top/bottom), `v` (left/right)
+Field reference:
+
+| Field | Required | Meaning |
+| --- | --- | --- |
+| `session.name` | No | Overrides the derived tmux session name. The value is normalized before use. |
+| `session.dir` | No | Target directory for the session. Used when the command does not pass a target. |
+| `session.path` | No | Alias for `session.dir`. Used only when `dir` is not set. |
+| `windows` | Yes | List of windows to create. Must contain at least one item. |
+| `windows[].name` | Yes | tmux window name. |
+| `windows[].dir` | No | Working directory for the window. Defaults to the selected target directory. |
+| `windows[].path` | No | Alias for `windows[].dir`. Used only when `dir` is not set. |
+| `windows[].command` | No | Command sent to the window after it is created. |
+| `windows[].run` | No | Alias for `windows[].command`. Used only when `command` is not set. |
+| `windows[].panes` | No | Extra panes to split from the window. Each item can be a command string or a map. |
+| `windows[].panes[]` | No | String form pane command. Uses horizontal split (`h`). |
+| `windows[].panes[].command` | No | Command sent to the pane after it is created. Empty commands are skipped. |
+| `windows[].panes[].run` | No | Alias for pane `command`. Used only when `command` is not set. |
+| `windows[].panes[].split` | No | Split direction. Supported values: `h`, `horizontal`, `top-bottom`, `v`, `vertical`, `left-right`. Defaults to `h`. |
+
+Split directions:
+
+- `h`, `horizontal`, `top-bottom`: create a top/bottom tmux split.
+- `v`, `vertical`, `left-right`: create a left/right tmux split.
 
 Cow/cob/cos example:
 

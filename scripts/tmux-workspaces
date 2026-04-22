@@ -3,7 +3,7 @@
 set -euo pipefail
 
 DEFAULT_PROJECT_ROOT="$HOME/Developer"
-DEFAULT_WINDOW_NAMES=(editor runtime ops)
+DEFAULT_WINDOW_NAMES=(editor shell runtime)
 DEFAULT_YAML_LAYOUT_FILE=".tmux-workspaces/layout.yaml"
 DEFAULT_YAML_LAYOUT_FILE_ALT=".tmux-workspaces/layout.yml"
 GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspaces/layouts"
@@ -29,13 +29,13 @@ Examples:
   tmux-workspaces
   tmux-workspaces my-app
   tmux-workspaces ../shared-lib
-  tmux-workspaces --layout dev my-workspace
+  tmux-workspaces --layout dev
   tmux-workspaces --layout --file ~/layouts/cow.yaml
 
 Notes:
   - No args (interactive): opens an fzf picker; cancel exits.
   - No args (non-interactive): uses current dir.
-  - With --layout and no target: uses current dir (no fzf).
+  - With --layout and no target: uses session.dir from YAML when present, otherwise current dir.
   - Single target: YAML layout or default windows.
 EOF
 }
@@ -451,6 +451,28 @@ yaml_session_name_override() {
   printf '%s\n' "$value"
 }
 
+yaml_session_target_dir() {
+  local layout_file="$1"
+  local value
+  local target_dir
+
+  require_yq
+  value="$(yq e -r '.session.dir // .session.path // ""' "$layout_file")"
+  value="$(trim "$(unnull "$value")")"
+
+  if [[ -z "$value" ]]; then
+    printf '\n'
+    return
+  fi
+
+  target_dir="$(resolve_target "$value")"
+  if [[ ! -d "$target_dir" ]]; then
+    fail "session.dir directory not found: $target_dir"
+  fi
+
+  printf '%s\n' "$(cd "$target_dir" && pwd -P)"
+}
+
 create_session_from_yaml_layout() {
   local session_name="$1"
   local target_dir="$2"
@@ -649,8 +671,12 @@ if ! command -v tmux >/dev/null 2>&1; then
 fi
 
 inputs=("${INPUT_ARGS[@]-}")
+target_from_command=0
 if [[ ${#inputs[@]} -eq 1 && -z "${inputs[0]}" ]]; then
   inputs=()
+fi
+if [[ ${#inputs[@]} -gt 0 ]]; then
+  target_from_command=1
 fi
 if [[ ${#inputs[@]} -eq 0 ]]; then
   if [[ -n "$LAYOUT_NAME" || -n "$LAYOUT_FILE_ARG" ]]; then
@@ -666,6 +692,7 @@ if [[ ${#inputs[@]} -eq 0 ]]; then
     fi
 
     inputs=("$selected")
+    target_from_command=1
   else
     inputs=("")
   fi
@@ -685,6 +712,13 @@ fi
 target="$(cd "$target" && pwd -P)"
 
 yaml_layout_file="$(resolve_yaml_layout_file "$target")"
+
+if [[ -n "$yaml_layout_file" && "$target_from_command" -eq 0 ]]; then
+  session_target="$(yaml_session_target_dir "$yaml_layout_file")"
+  if [[ -n "$session_target" ]]; then
+    target="$session_target"
+  fi
+fi
 
 session_name="$(session_name_for_target "$target")"
 
