@@ -1,14 +1,10 @@
 # tmux-workspaces
 
-`tmux-workspaces` is a tmux launcher in a Primeagen's sessionizer style script path.
+`tmux-workspaces` is a small tmux workspace launcher in the style of ThePrimeagen's sessionizer.
 
 ## Install
 
-Commands:
-
-- `tmux-workspaces`
-
-The command lives in `scripts`.
+The command is the `scripts/tmux-workspaces` shell script. Add the repo's `scripts` directory to your `PATH`.
 
 Fish (current shell):
 
@@ -27,6 +23,8 @@ Check command path:
 ```fish
 type -a tmux-workspaces
 ```
+
+The command should appear as `tmux-workspaces`.
 
 ## Uninstall (Fish)
 
@@ -53,32 +51,54 @@ If you manually added `set -gx PATH .../scripts $PATH` in `~/.config/fish/config
 ```bash
 tmux-workspaces
 tmux-workspaces my-app
+tmux-workspaces ../shared-lib
 tmux-workspaces --layout dev my-workspace
-tmux-workspaces --file ~/Developer/layouts/cow.yaml
+tmux-workspaces --layout --file ~/layouts/cow.yaml
+tmux-workspaces --help
 ```
 
-CLI options:
+## Command Modes
 
-- `--layout <name>`: use a named global layout from `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`)
-- `--file <path>`: use a specific YAML file path
-- `-h`, `--help`: show help
+`tmux-workspaces` supports one target per invocation. A target can be a project name or a directory path.
 
-Help shortcuts:
+| Command | Mode | Behavior |
+| --- | --- | --- |
+| `tmux-workspaces` | Interactive picker | Opens `fzf` when running in an interactive terminal. Cancel exits without error. |
+| `tmux-workspaces` | Current directory | In non-interactive use, uses the current directory. |
+| `tmux-workspaces <target>` | Target workspace | Resolves `<target>` to a directory, then uses project-local layout if present, otherwise default windows. |
+| `tmux-workspaces --layout <name> [target]` | Named layout | Loads `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. If no target is given, uses the current directory. |
+| `tmux-workspaces --layout --file <path> [target]` | Explicit layout file | Loads the YAML file at `<path>` from anywhere. If no target is given, uses the current directory. |
+| `tmux-workspaces --help` | Help | Prints command help. |
 
-- `tmux-workspaces --help`
+## Options
 
-- No args (interactive): opens `fzf`; cancel exits
-- No args (non-interactive): uses current directory
-- With `--layout`/`--file` and no target: uses current directory (skips `fzf`)
-- One target per command invocation
-- `--layout` / `--file` are for single-target mode only
+| Option | Meaning |
+| --- | --- |
+| `--layout <name>` | Use a named global layout from `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. The value must be a layout name, not a path. |
+| `--layout --file <path>` | Use a specific YAML layout file. The path can point anywhere and is resolved exactly as supplied. |
+| `-h`, `--help` | Show help. |
 
-Target resolution order:
+Notes:
 
-1. explicit path (`.`, `..`, `/...`, `~/...`)
+- `--file <path>` by itself is not a valid mode; use `--layout --file <path>`.
+- `--layout` modes skip `fzf` when no target is provided and use the current directory instead.
+- Only one target is supported per command invocation.
+
+## Resolution Order
+
+When a target is provided, it resolves to a directory in this order:
+
+1. explicit path (`.`, `..`, `./...`, `../...`, `/...`, `~/...`)
 2. existing local directory in current working directory
 3. `zoxide` match (`zoxide query <name>`) when available
 4. fallback to `~/Developer/<name>`
+
+In single-target mode, the layout is selected in this order:
+
+1. `--layout --file <path>`: explicit YAML file from anywhere
+2. `--layout <name>`: global named layout from `~/.config/tmux-workspaces/layouts/`
+3. auto-detect project-local `.tmux-workspaces/layout.yaml` or `.tmux-workspaces/layout.yml` in the target directory
+4. built-in default windows (`editor`, `runtime`, `ops`)
 
 ## YAML layout (recommended)
 
@@ -87,7 +107,7 @@ YAML supports named layouts, windows, startup commands, and panes.
 There are two different YAML layout sources:
 
 - Project-local layout: `.tmux-workspaces/layout.yaml` (or `.tmux-workspaces/layout.yml`) inside the target directory
-  - Auto-detected when you run `tmux-workspaces <target>` without `--layout` or `--file`
+  - Auto-detected when you run `tmux-workspaces <target>` without `--layout`
   - Best for project-specific setup that should live with that repo
 - Global named layout: `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`)
   - Used only when you pass `--layout <name>`
@@ -153,13 +173,6 @@ windows:
       - split: h
         command: mysql -P 3301 --protocol=tcp -u root -ppaymenow
 ```
-
-Selection order in single-target mode:
-
-1. `--file <path>`: explicit YAML file (any location)
-2. `--layout <name>`: global named layout from `~/.config/tmux-workspaces/layouts/`
-3. auto-detect project-local `.tmux-workspaces/layout.yaml` or `.tmux-workspaces/layout.yml` in the target directory
-4. built-in default windows (`editor`, `runtime`, `ops`)
 
 ## External Dependencies
 
