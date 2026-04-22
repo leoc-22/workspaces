@@ -4,8 +4,8 @@ set -euo pipefail
 
 DEFAULT_PROJECT_ROOT="$HOME/Developer"
 DEFAULT_WINDOW_NAMES=(editor runtime ops)
-DEFAULT_YAML_LAYOUT_FILE=".workspace/layout.yaml"
-DEFAULT_YAML_LAYOUT_FILE_ALT=".workspace/layout.yml"
+DEFAULT_YAML_LAYOUT_FILE=".tmux-workspaces/layout.yaml"
+DEFAULT_YAML_LAYOUT_FILE_ALT=".tmux-workspaces/layout.yml"
 GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspaces/layouts"
 
 LAYOUT_NAME=""
@@ -16,7 +16,7 @@ declare -a INPUT_ARGS=()
 
 usage() {
   cat <<'EOF'
-Usage: tmux-workspace [options] [project-name-or-directory]
+Usage: tmux-workspaces [options] [project-name-or-directory]
 
 Options:
   -l, --layout <name>   Use ~/.config/tmux-workspaces/layouts/<name>.yaml (or .yml)
@@ -24,11 +24,11 @@ Options:
   -h, --help            Show this help
 
 Examples:
-  tmux-workspace
-  tmux-workspace my-app
-  tmux-workspace ../shared-lib
-  tmux-workspace --layout dev my-workspace
-  tmux-workspace --file ~/Developer/layouts/cow.yaml
+  tmux-workspaces
+  tmux-workspaces my-app
+  tmux-workspaces ../shared-lib
+  tmux-workspaces --layout dev my-workspace
+  tmux-workspaces --file ~/Developer/layouts/cow.yaml
 
 Notes:
   - No args (interactive): opens an fzf picker; cancel exits.
@@ -39,7 +39,7 @@ EOF
 }
 
 fail() {
-  printf 'tmux-workspace: %s\n' "$1" >&2
+  printf 'tmux-workspaces: %s\n' "$1" >&2
   exit 1
 }
 

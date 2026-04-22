@@ -1,12 +1,12 @@
-# tmux workflow
+# tmux-workspaces
 
-`tmux-workspace` is a tmux launcher in a Primeagen-style script path.
+`tmux-workspaces` is a tmux launcher in a Primeagen's sessionizer style script path.
 
 ## Install
 
 Commands:
 
-- `tmux-workspace`
+- `tmux-workspaces`
 
 The command lives in `scripts`.
 
@@ -25,7 +25,7 @@ fish_add_path /Users/leoc/Developer/tmux-workflow/scripts
 Check command path:
 
 ```fish
-type -a tmux-workspace
+type -a tmux-workspaces
 ```
 
 ## Uninstall (Fish)
@@ -51,21 +51,21 @@ If you manually added `set -gx PATH .../scripts $PATH` in `~/.config/fish/config
 ## Usage
 
 ```bash
-tmux-workspace
-tmux-workspace my-app
-tmux-workspace --layout dev my-workspace
-tmux-workspace --file ~/Developer/layouts/cow.yaml
+tmux-workspaces
+tmux-workspaces my-app
+tmux-workspaces --layout dev my-workspace
+tmux-workspaces --file ~/Developer/layouts/cow.yaml
 ```
 
 CLI options:
 
-- `--layout <name>`: use `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`)
+- `--layout <name>`: use a named global layout from `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`)
 - `--file <path>`: use a specific YAML file path
 - `-h`, `--help`: show help
 
 Help shortcuts:
 
-- `tmux-workspace --help`
+- `tmux-workspaces --help`
 
 - No args (interactive): opens `fzf`; cancel exits
 - No args (non-interactive): uses current directory
@@ -84,13 +84,16 @@ Target resolution order:
 
 YAML supports named layouts, windows, startup commands, and panes.
 
-Default auto-detected file (single target):
+There are two different YAML layout sources:
 
-- `.workspace/layout.yaml` (or `.workspace/layout.yml`)
+- Project-local layout: `.tmux-workspaces/layout.yaml` (or `.tmux-workspaces/layout.yml`) inside the target directory
+  - Auto-detected when you run `tmux-workspaces <target>` without `--layout` or `--file`
+  - Best for project-specific setup that should live with that repo
+- Global named layout: `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`)
+  - Used only when you pass `--layout <name>`
+  - Best for reusable templates shared across multiple projects
 
-Named layout file:
-
-- `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`), used via `--layout <name>`
+In short: `.tmux-workspaces/layout.yaml` is automatic per project; `~/.config/tmux-workspaces/layouts/*.yaml` is opt-in via `--layout`.
 
 Recommended structure:
 
@@ -102,7 +105,7 @@ Recommended structure:
     staging.yaml
 
 my-workspace/
-  .workspace/
+  .tmux-workspaces/
     layout.yaml
 ```
 
@@ -153,17 +156,17 @@ windows:
 
 Selection order in single-target mode:
 
-1. `--file <path>`
-2. `--layout <name>`
-3. `.workspace/layout.yaml` or `.workspace/layout.yml`
+1. `--file <path>`: explicit YAML file (any location)
+2. `--layout <name>`: global named layout from `~/.config/tmux-workspaces/layouts/`
+3. auto-detect project-local `.tmux-workspaces/layout.yaml` or `.tmux-workspaces/layout.yml` in the target directory
 4. built-in default windows (`editor`, `runtime`, `ops`)
 
 ## External Dependencies
 
 - `tmux` (required): session/window management
-- `yq` (required for YAML layouts): parse `layout.yaml` and named layouts
-- `fzf` (required for interactive no-arg mode): picker for `tmux-workspace` with no arguments
-- `zoxide` (optional): smart directory match for `tmux-workspace <name>`
+- `yq` (required for YAML layouts): parse project-local `.tmux-workspaces/layout.yaml` and global named layouts
+- `fzf` (required for interactive no-arg mode): picker for `tmux-workspaces` with no arguments
+- `zoxide` (optional): smart directory match for `tmux-workspaces <name>`
 
 Install (macOS/Homebrew):
 
@@ -195,5 +198,5 @@ sudo apt install -y zoxide
 Run the tiny shell regression harness:
 
 ```bash
-bash tests/tmux-workspace-regression.sh
+bash tests/tmux-workspaces-regression.sh
 ```

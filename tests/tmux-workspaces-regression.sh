@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-SCRIPT_PATH="$ROOT_DIR/scripts/tmux-workspace"
+SCRIPT_PATH="$ROOT_DIR/scripts/tmux-workspaces"
 
 if ! command -v script >/dev/null 2>&1; then
   printf 'script(1) is required for this regression test\n' >&2
