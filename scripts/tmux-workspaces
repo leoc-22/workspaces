@@ -487,6 +487,7 @@ create_session_from_yaml_layout() {
   local raw_dir
   local resolved_dir
   local command
+  local pane_tag
   local pane_command
   local pane_split
   local pane_spec
@@ -527,13 +528,22 @@ create_session_from_yaml_layout() {
     fi
 
     for ((j = 0; j < pane_count; j++)); do
-      pane_command="$(yq e -r ".windows[$i].panes[$j] | if type == \"!!map\" then (.command // .run // \"\") else . end" "$layout_file")"
+      pane_tag="$(yq e -r ".windows[$i].panes[$j] | tag" "$layout_file")"
+      if [[ "$pane_tag" == "!!map" ]]; then
+        pane_command="$(yq e -r ".windows[$i].panes[$j].command // .windows[$i].panes[$j].run // \"\"" "$layout_file")"
+      else
+        pane_command="$(yq e -r ".windows[$i].panes[$j]" "$layout_file")"
+      fi
       pane_command="$(trim "$(unnull "$pane_command")")"
       if [[ -z "$pane_command" ]]; then
         continue
       fi
 
-      pane_split="$(yq e -r ".windows[$i].panes[$j] | if type == \"!!map\" then (.split // \"h\") else \"h\" end" "$layout_file")"
+      if [[ "$pane_tag" == "!!map" ]]; then
+        pane_split="$(yq e -r ".windows[$i].panes[$j].split // \"h\"" "$layout_file")"
+      else
+        pane_split="h"
+      fi
       pane_split="$(trim "$(unnull "$pane_split")")"
 
       case "$pane_split" in

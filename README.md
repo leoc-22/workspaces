@@ -1,6 +1,6 @@
 # tmux-workspaces
 
-`tmux-workspaces` is a small tmux workspace launcher in the style of ThePrimeagen's sessionizer.
+`tmux-workspaces` is a tmux workspace launcher inspired by ThePrimeagen's sessionizer.
 
 ## Install
 

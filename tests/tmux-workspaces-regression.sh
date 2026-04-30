@@ -16,6 +16,7 @@ tmux_log="$stub_dir/tmux.log"
 target_dir="$stub_dir/project"
 session_target_dir="$stub_dir/session-target"
 layout_file="$stub_dir/layout.yaml"
+panes_layout_file="$stub_dir/panes-layout.yaml"
 
 cleanup() {
   rm -rf "$stub_dir"
@@ -29,6 +30,9 @@ if [[ "${1:-}" == "has-session" ]]; then
 fi
 if [[ -n "${TMUX_MARKER_FILE:-}" ]]; then
   printf '%s\n' "$*" >>"$TMUX_MARKER_FILE"
+fi
+if [[ "${1:-}" == "split-window" ]]; then
+  printf '%%1\n'
 fi
 exit 0
 EOF
@@ -49,6 +53,7 @@ if [[ "${1:-}" == "-r" ]]; then
 fi
 expr="$1"
 file="$2"
+name="$(basename "$file")"
 
 case "$expr" in
   '.session.name // ""')
@@ -70,7 +75,29 @@ case "$expr" in
     printf '\n'
     ;;
   '(.windows[0].panes // []) | length')
-    printf '0\n'
+    if [[ "$name" == "panes-layout.yaml" ]]; then
+      printf '2\n'
+    else
+      printf '0\n'
+    fi
+    ;;
+  '.windows[0].panes[0] | tag')
+    printf '!!map\n'
+    ;;
+  '.windows[0].panes[0].command // .windows[0].panes[0].run // ""')
+    printf 'npm ls -g\n'
+    ;;
+  '.windows[0].panes[0].split // "h"')
+    printf 'h\n'
+    ;;
+  '.windows[0].panes[1] | tag')
+    printf '!!map\n'
+    ;;
+  '.windows[0].panes[1].command // .windows[0].panes[1].run // ""')
+    printf 'nvim\n'
+    ;;
+  '.windows[0].panes[1].split // "h"')
+    printf 'v\n'
     ;;
   *)
     printf '\n'
@@ -83,6 +110,7 @@ mkdir -p "$target_dir" "$session_target_dir"
 session_target_dir="$(cd "$session_target_dir" && pwd -P)"
 printf 'windows: []\n' >"$target_dir/only-in-target.yaml"
 printf 'session:\n  dir: %s\nwindows:\n  - name: editor\n' "$session_target_dir" >"$layout_file"
+printf 'windows:\n  - name: editor\n    panes:\n      - split: h\n        command: npm ls -g\n      - split: v\n        command: nvim\n' >"$panes_layout_file"
 
 run_tty() {
   script -q /dev/null env PATH="$stub_dir:$PATH" FZF_MARKER_FILE="$marker_file" TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}" "$SCRIPT_PATH" "$@"
@@ -116,7 +144,7 @@ assert_exists() {
   fi
 }
 
-printf '1..5\n'
+printf '1..6\n'
 
 rm -f "$marker_file"
 set +e
@@ -192,3 +220,20 @@ assert_contains "$(cat "$tmux_log")" "new-session -d -s"
 assert_contains "$(cat "$tmux_log")" "-c $session_target_dir"
 assert_not_exists "$marker_file"
 printf 'ok 5 - --layout --file uses session.dir as target\n'
+
+rm -f "$marker_file" "$tmux_log"
+set +e
+TMUX_HAS_SESSION_STATUS=1 run_tty --layout --file "$panes_layout_file" "$target_dir" >/dev/null 2>&1
+status_6=$?
+set -e
+
+if [[ $status_6 -ne 0 ]]; then
+  printf 'not ok 6 - map-form panes should parse with yq tag checks (got status %s)\n' "$status_6"
+  exit 1
+fi
+
+assert_contains "$(cat "$tmux_log")" "split-window -v"
+assert_contains "$(cat "$tmux_log")" "send-keys -t %1"
+assert_contains "$(cat "$tmux_log")" "npm ls -g"
+assert_contains "$(cat "$tmux_log")" "nvim"
+printf 'ok 6 - map-form panes parse with yq tag checks\n'
