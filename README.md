@@ -9,13 +9,13 @@ The command is the `scripts/tmux-workspaces` shell script. Add the repo's `scrip
 Fish (current shell):
 
 ```fish
-set -gx PATH /Users/leoc/Developer/tmux-workflow/scripts $PATH
+set -gx PATH /Users/leoc/Developer/tmux-workspaces/scripts $PATH
 ```
 
 Fish (persist):
 
 ```fish
-fish_add_path /Users/leoc/Developer/tmux-workflow/scripts
+fish_add_path /Users/leoc/Developer/tmux-workspaces/scripts
 ```
 
 Check command path:
@@ -31,7 +31,7 @@ The command should appear as `tmux-workspaces`.
 Remove persisted PATH entry:
 
 ```fish
-set -l target /Users/leoc/Developer/tmux-workflow/scripts
+set -l target /Users/leoc/Developer/tmux-workspaces/scripts
 set -l i (contains -i -- $target $fish_user_paths)
 if test -n "$i"
     set -e fish_user_paths[$i]
