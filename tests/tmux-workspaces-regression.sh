@@ -12,6 +12,7 @@ fi
 
 stub_dir="$(mktemp -d)"
 marker_file="$stub_dir/fzf-called"
+fzf_input_file="$stub_dir/fzf-input"
 tmux_log="$stub_dir/tmux.log"
 target_dir="$stub_dir/project"
 session_target_dir="$stub_dir/session-target"
@@ -25,6 +26,10 @@ trap cleanup EXIT
 
 cat >"$stub_dir/tmux" <<'EOF'
 #!/usr/bin/env bash
+if [[ "${1:-}" == "list-sessions" ]]; then
+  printf '%s\n' ${TMUX_SESSIONS:-api web}
+  exit 0
+fi
 if [[ "${1:-}" == "has-session" ]]; then
   exit "${TMUX_HAS_SESSION_STATUS:-0}"
 fi
@@ -41,6 +46,15 @@ cat >"$stub_dir/fzf" <<'EOF'
 #!/usr/bin/env bash
 if [[ -n "${FZF_MARKER_FILE:-}" ]]; then
   : >"$FZF_MARKER_FILE"
+fi
+if [[ -n "${FZF_INPUT_FILE:-}" ]]; then
+  cat >"$FZF_INPUT_FILE"
+else
+  cat >/dev/null
+fi
+if [[ -n "${FZF_SELECTION:-}" ]]; then
+  printf '%s\n' "$FZF_SELECTION"
+  exit 0
 fi
 exit 1
 EOF
@@ -113,7 +127,7 @@ printf 'session:\n  dir: %s\nwindows:\n  - name: editor\n' "$session_target_dir"
 printf 'windows:\n  - name: editor\n    panes:\n      - split: h\n        command: npm ls -g\n      - split: v\n        command: nvim\n' >"$panes_layout_file"
 
 run_tty() {
-  script -q /dev/null env PATH="$stub_dir:$PATH" FZF_MARKER_FILE="$marker_file" TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}" "$SCRIPT_PATH" "$@"
+  script -q /dev/null env PATH="$stub_dir:$PATH" PROJ_SEARCH_DIRS="${PROJ_SEARCH_DIRS:-$stub_dir}" FZF_MARKER_FILE="$marker_file" FZF_INPUT_FILE="${FZF_INPUT_FILE:-}" FZF_SELECTION="${FZF_SELECTION:-}" TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}" TMUX_SESSIONS="${TMUX_SESSIONS:-api web}" TMUX="${TMUX:-}" "$SCRIPT_PATH" "$@"
 }
 
 assert_contains() {
@@ -144,7 +158,7 @@ assert_exists() {
   fi
 }
 
-printf '1..6\n'
+printf '1..9\n'
 
 rm -f "$marker_file"
 set +e
@@ -237,3 +251,48 @@ assert_contains "$(cat "$tmux_log")" "send-keys -t %1"
 assert_contains "$(cat "$tmux_log")" "npm ls -g"
 assert_contains "$(cat "$tmux_log")" "nvim"
 printf 'ok 6 - map-form panes parse with yq tag checks\n'
+
+rm -f "$marker_file" "$tmux_log" "$fzf_input_file"
+set +e
+FZF_INPUT_FILE="$fzf_input_file" FZF_SELECTION="[session] api" TMUX=/tmp/tmux run_tty >/dev/null 2>&1
+status_7=$?
+set -e
+
+if [[ $status_7 -ne 0 ]]; then
+  printf 'not ok 7 - no-arg interactive should switch selected tmux session (got status %s)\n' "$status_7"
+  exit 1
+fi
+
+assert_contains "$(cat "$fzf_input_file")" "[session] api"
+assert_contains "$(cat "$fzf_input_file")" "[project] $target_dir"
+assert_contains "$(cat "$tmux_log")" "switch-client -t api"
+printf 'ok 7 - no-arg interactive can fuzzy-switch existing tmux sessions\n'
+
+rm -f "$marker_file" "$tmux_log"
+set +e
+TMUX=/tmp/tmux run_tty --session web >/dev/null 2>&1
+status_8=$?
+set -e
+
+if [[ $status_8 -ne 0 ]]; then
+  printf 'not ok 8 - --session name should switch directly (got status %s)\n' "$status_8"
+  exit 1
+fi
+
+assert_not_exists "$marker_file"
+assert_contains "$(cat "$tmux_log")" "switch-client -t web"
+printf 'ok 8 - --session switches directly without fzf\n'
+
+rm -f "$marker_file" "$tmux_log"
+set +e
+TMUX_HAS_SESSION_STATUS=1 run_tty --session missing >/dev/null 2>&1
+status_9=$?
+set -e
+
+if [[ $status_9 -ne 1 ]]; then
+  printf 'not ok 9 - --session should fail for missing sessions (got status %s)\n' "$status_9"
+  exit 1
+fi
+
+assert_not_exists "$marker_file"
+printf 'ok 9 - --session fails for missing sessions\n'
