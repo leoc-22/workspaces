@@ -52,6 +52,8 @@ If you manually added `set -gx PATH .../scripts $PATH` in `~/.config/fish/config
 tmux-workspaces
 tmux-workspaces my-app
 tmux-workspaces ../shared-lib
+tmux-workspaces --session
+tmux-workspaces --session my-app
 tmux-workspaces --layout dev
 tmux-workspaces --layout --file ~/layouts/cow.yaml
 tmux-workspaces --help
@@ -63,9 +65,11 @@ tmux-workspaces --help
 
 | Command | Mode | Behavior |
 | --- | --- | --- |
-| `tmux-workspaces` | Interactive picker | Opens `fzf` when running in an interactive terminal. Cancel exits without error. |
+| `tmux-workspaces` | Interactive picker | Opens `fzf` when running in an interactive terminal. Active tmux sessions and project directories are both listed. Choosing a session switches to it; choosing a project opens or creates its workspace. Cancel exits without error. |
 | `tmux-workspaces` | Current directory | In non-interactive use, uses the current directory. |
 | `tmux-workspaces <target>` | Target workspace | Resolves `<target>` to a directory, then uses project-local layout if present, otherwise default windows. |
+| `tmux-workspaces --session` | Interactive session picker | Opens `fzf` over active tmux sessions only, then switches or attaches to the selected session. Cancel exits without error. |
+| `tmux-workspaces --session <name>` | Direct session switch | Switches or attaches to an existing tmux session by name. Fails if the session does not exist. |
 | `tmux-workspaces --layout <name> [target]` | Named layout | Loads `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. If no target is given, uses `session.dir` from the layout when present, otherwise the current directory. |
 | `tmux-workspaces --layout --file <path> [target]` | Explicit layout file | Loads the YAML file at `<path>` from anywhere. If no target is given, uses `session.dir` from the layout when present, otherwise the current directory. |
 | `tmux-workspaces --help` | Help | Prints command help. |
@@ -76,11 +80,13 @@ tmux-workspaces --help
 | --- | --- |
 | `--layout <name>` | Use a named global layout from `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. The value must be a layout name, not a path. |
 | `--layout --file <path>` | Use a specific YAML layout file. The path can point anywhere and is resolved exactly as supplied. |
+| `-s`, `--session [name]` | Switch to an active tmux session. With no name, opens an interactive `fzf` picker over active sessions. |
 | `-h`, `--help` | Show help. |
 
 Notes:
 
 - `--file <path>` by itself is not a valid mode; use `--layout --file <path>`.
+- `--session` cannot be combined with `--layout`; it only targets already-running tmux sessions.
 - `--layout` modes skip `fzf` when no target is provided and use `session.dir` from the layout when present, otherwise the current directory.
 - A target passed on the command line overrides `session.dir`.
 - Only one target is supported per command invocation.

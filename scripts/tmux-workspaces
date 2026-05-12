@@ -11,6 +11,8 @@ GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspaces/layouts"
 LAYOUT_NAME=""
 LAYOUT_FILE_ARG=""
 LAYOUT_REQUESTED=0
+SESSION_MODE=0
+SESSION_NAME_ARG=""
 SPEC_TARGET=""
 
 declare -a INPUT_ARGS=()
@@ -23,18 +25,22 @@ Options:
   -l, --layout <name>   Use ~/.config/tmux-workspaces/layouts/<name>.yaml (or .yml)
   --layout --file <path>
                          Use explicit YAML layout file path from anywhere
+  -s, --session [name]  Fuzzy-pick an active tmux session, or switch to name
   -h, --help            Show this help
 
 Examples:
   tmux-workspaces
   tmux-workspaces my-app
   tmux-workspaces ../shared-lib
+  tmux-workspaces --session
+  tmux-workspaces --session my-app
   tmux-workspaces --layout dev
   tmux-workspaces --layout --file ~/layouts/cow.yaml
 
 Notes:
-  - No args (interactive): opens an fzf picker; cancel exits.
+  - No args (interactive): opens an fzf picker for sessions and projects; cancel exits.
   - No args (non-interactive): uses current dir.
+  - --session only switches to active tmux sessions; it does not create projects.
   - With --layout and no target: uses session.dir from YAML when present, otherwise current dir.
   - Single target: YAML layout or default windows.
 EOF
@@ -129,6 +135,22 @@ parse_args() {
         [[ -z "$LAYOUT_NAME" ]] && fail "missing value for --layout"
         shift
         ;;
+      -s|--session)
+        SESSION_MODE=1
+        if [[ $# -ge 2 && "$2" != -* ]]; then
+          SESSION_NAME_ARG="$(trim "$2")"
+          [[ -z "$SESSION_NAME_ARG" ]] && fail "missing value for --session"
+          shift 2
+        else
+          shift
+        fi
+        ;;
+      --session=*)
+        SESSION_MODE=1
+        SESSION_NAME_ARG="$(trim "${1#*=}")"
+        [[ -z "$SESSION_NAME_ARG" ]] && fail "missing value for --session"
+        shift
+        ;;
       -f|--file)
         [[ $# -lt 2 ]] && fail "missing value for $1"
         LAYOUT_FILE_ARG="$(trim "$2")"
@@ -163,6 +185,16 @@ parse_args() {
 
   if [[ -n "$LAYOUT_FILE_ARG" && "$LAYOUT_REQUESTED" -ne 1 ]]; then
     fail "use --layout --file for explicit layout files"
+  fi
+
+  if [[ "$SESSION_MODE" -eq 1 ]]; then
+    if [[ -n "$LAYOUT_NAME" || -n "$LAYOUT_FILE_ARG" || "$LAYOUT_REQUESTED" -eq 1 ]]; then
+      fail "--session cannot be combined with --layout"
+    fi
+
+    if [[ ${#INPUT_ARGS[@]} -gt 0 ]]; then
+      fail "--session accepts at most one session name"
+    fi
   fi
 
   if [[ -n "$LAYOUT_NAME" && "$LAYOUT_NAME" == "null" ]]; then
@@ -243,12 +275,67 @@ collect_project_candidates() {
   done
 }
 
+collect_tmux_sessions() {
+  tmux list-sessions -F '#S' 2>/dev/null || true
+}
+
+collect_session_picker_candidates() {
+  local session_name
+
+  while IFS= read -r session_name; do
+    if [[ -n "$session_name" ]]; then
+      printf '[session] %s\n' "$session_name"
+    fi
+  done < <(collect_tmux_sessions)
+}
+
+collect_project_picker_candidates() {
+  local project_dir
+
+  while IFS= read -r project_dir; do
+    if [[ -n "$project_dir" ]]; then
+      printf '[project] %s\n' "$project_dir"
+    fi
+  done < <(collect_project_candidates)
+}
+
 select_with_fzf() {
   local selection
-  selection="$(collect_project_candidates | fzf --prompt='workspace> ' --height=40% --layout=reverse --border || true)"
+  selection="$(
+    {
+      collect_session_picker_candidates
+      collect_project_picker_candidates
+    } | fzf --prompt='workspace> ' --height=40% --layout=reverse --border || true
+  )"
   if [[ -n "$selection" ]]; then
     printf '%s\n' "$selection"
   fi
+}
+
+select_session_with_fzf() {
+  local selection
+  selection="$(collect_tmux_sessions | fzf --prompt='session> ' --height=40% --layout=reverse --border || true)"
+  if [[ -n "$selection" ]]; then
+    printf '%s\n' "$selection"
+  fi
+}
+
+switch_to_session() {
+  local session_name="$1"
+
+  if [[ -z "$session_name" ]]; then
+    fail "missing tmux session name"
+  fi
+
+  if ! tmux has-session -t "$session_name" 2>/dev/null; then
+    fail "tmux session not found: $session_name"
+  fi
+
+  if [[ -n "${TMUX:-}" ]]; then
+    exec tmux switch-client -t "$session_name"
+  fi
+
+  exec tmux attach-session -t "$session_name"
 }
 
 parse_target_spec() {
@@ -680,6 +767,25 @@ if ! command -v tmux >/dev/null 2>&1; then
   fail "tmux is not installed or not on PATH"
 fi
 
+if [[ "$SESSION_MODE" -eq 1 ]]; then
+  if [[ -z "$SESSION_NAME_ARG" ]]; then
+    if [[ ! -t 0 || ! -t 1 ]]; then
+      fail "--session requires a session name when not running interactively"
+    fi
+
+    if ! command -v fzf >/dev/null 2>&1; then
+      fail "fzf is required for interactive session selection"
+    fi
+
+    SESSION_NAME_ARG="$(select_session_with_fzf)"
+    if [[ -z "$SESSION_NAME_ARG" ]]; then
+      exit 0
+    fi
+  fi
+
+  switch_to_session "$SESSION_NAME_ARG"
+fi
+
 inputs=("${INPUT_ARGS[@]-}")
 target_from_command=0
 if [[ ${#inputs[@]} -eq 1 && -z "${inputs[0]}" ]]; then
@@ -701,8 +807,19 @@ if [[ ${#inputs[@]} -eq 0 ]]; then
       exit 0
     fi
 
-    inputs=("$selected")
-    target_from_command=1
+    case "$selected" in
+      "[session] "*)
+        switch_to_session "${selected#"[session] "}"
+        ;;
+      "[project] "*)
+        inputs=("${selected#"[project] "}")
+        target_from_command=1
+        ;;
+      *)
+        inputs=("$selected")
+        target_from_command=1
+        ;;
+    esac
   else
     inputs=("")
   fi
