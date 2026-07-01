@@ -59,6 +59,24 @@ tmux-workspaces --layout --file ~/layouts/cow.yaml
 tmux-workspaces --help
 ```
 
+### Open the picker from tmux
+
+Use a tmux popup to open the interactive picker without first switching to an
+empty terminal:
+
+```tmux
+bind-key W display-popup -E -w 80% -h 70% "tmux-workspaces"
+```
+
+Add the binding to `~/.tmux.conf`, then reload the configuration. Press the
+tmux prefix followed by `Shift-w` to open the picker. `-E` closes the popup
+when the command exits, while `-w 80%` and `-h 70%` set the popup width and
+height relative to the tmux client.
+
+This form requires `tmux-workspaces` to be available on the shell `PATH` used
+by tmux. Otherwise, replace `"tmux-workspaces"` with the script's absolute
+path.
+
 ## Command Modes
 
 `tmux-workspaces` supports one target per invocation. A target can be a project name or a directory path.
