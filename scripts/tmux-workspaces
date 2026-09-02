@@ -284,7 +284,7 @@ collect_session_picker_candidates() {
 
   while IFS= read -r session_name; do
     if [[ -n "$session_name" ]]; then
-      printf '[session] %s\n' "$session_name"
+      printf '\033[36m[session] %s\033[0m\n' "$session_name"
     fi
   done < <(collect_tmux_sessions)
 }
@@ -305,7 +305,7 @@ select_with_fzf() {
     {
       collect_session_picker_candidates
       collect_project_picker_candidates
-    } | fzf --prompt='workspace> ' --height=40% --layout=reverse --border || true
+    } | fzf --ansi --prompt='workspace> ' --height=40% --layout=reverse --border || true
   )"
   if [[ -n "$selection" ]]; then
     printf '%s\n' "$selection"

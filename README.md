@@ -65,12 +65,12 @@ Use a tmux popup to open the interactive picker without first switching to an
 empty terminal:
 
 ```tmux
-bind-key W display-popup -E -w 80% -h 70% "tmux-workspaces"
+bind-key C-w display-popup -E -w 50% -h 28% "tmux-workspaces"
 ```
 
 Add the binding to `~/.tmux.conf`, then reload the configuration. Press the
-tmux prefix followed by `Shift-w` to open the picker. `-E` closes the popup
-when the command exits, while `-w 80%` and `-h 70%` set the popup width and
+tmux prefix followed by `Ctrl-w` to open the picker. `-E` closes the popup
+when the command exits, while `-w 50%` and `-h 28%` set the popup width and
 height relative to the tmux client.
 
 This form requires `tmux-workspaces` to be available on the shell `PATH` used

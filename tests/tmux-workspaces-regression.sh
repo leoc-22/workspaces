@@ -13,6 +13,7 @@ fi
 stub_dir="$(mktemp -d)"
 marker_file="$stub_dir/fzf-called"
 fzf_input_file="$stub_dir/fzf-input"
+fzf_args_file="$stub_dir/fzf-args"
 tmux_log="$stub_dir/tmux.log"
 target_dir="$stub_dir/project"
 session_target_dir="$stub_dir/session-target"
@@ -51,6 +52,9 @@ if [[ -n "${FZF_INPUT_FILE:-}" ]]; then
   cat >"$FZF_INPUT_FILE"
 else
   cat >/dev/null
+fi
+if [[ -n "${FZF_ARGS_FILE:-}" ]]; then
+  printf '%s\n' "$*" >"$FZF_ARGS_FILE"
 fi
 if [[ -n "${FZF_SELECTION:-}" ]]; then
   printf '%s\n' "$FZF_SELECTION"
@@ -127,7 +131,7 @@ printf 'session:\n  dir: %s\nwindows:\n  - name: editor\n' "$session_target_dir"
 printf 'windows:\n  - name: editor\n    panes:\n      - split: h\n        command: npm ls -g\n      - split: v\n        command: nvim\n' >"$panes_layout_file"
 
 run_tty() {
-  script -q /dev/null env PATH="$stub_dir:$PATH" PROJ_SEARCH_DIRS="${PROJ_SEARCH_DIRS:-$stub_dir}" FZF_MARKER_FILE="$marker_file" FZF_INPUT_FILE="${FZF_INPUT_FILE:-}" FZF_SELECTION="${FZF_SELECTION:-}" TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}" TMUX_SESSIONS="${TMUX_SESSIONS:-api web}" TMUX="${TMUX:-}" "$SCRIPT_PATH" "$@"
+  script -q /dev/null env PATH="$stub_dir:$PATH" PROJ_SEARCH_DIRS="${PROJ_SEARCH_DIRS:-$stub_dir}" FZF_MARKER_FILE="$marker_file" FZF_INPUT_FILE="${FZF_INPUT_FILE:-}" FZF_ARGS_FILE="${FZF_ARGS_FILE:-}" FZF_SELECTION="${FZF_SELECTION:-}" TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}" TMUX_SESSIONS="${TMUX_SESSIONS:-api web}" TMUX="${TMUX:-}" "$SCRIPT_PATH" "$@"
 }
 
 assert_contains() {
@@ -252,9 +256,9 @@ assert_contains "$(cat "$tmux_log")" "npm ls -g"
 assert_contains "$(cat "$tmux_log")" "nvim"
 printf 'ok 6 - map-form panes parse with yq tag checks\n'
 
-rm -f "$marker_file" "$tmux_log" "$fzf_input_file"
+rm -f "$marker_file" "$tmux_log" "$fzf_input_file" "$fzf_args_file"
 set +e
-FZF_INPUT_FILE="$fzf_input_file" FZF_SELECTION="[session] api" TMUX=/tmp/tmux run_tty >/dev/null 2>&1
+FZF_INPUT_FILE="$fzf_input_file" FZF_ARGS_FILE="$fzf_args_file" FZF_SELECTION="[session] api" TMUX=/tmp/tmux run_tty >/dev/null 2>&1
 status_7=$?
 set -e
 
@@ -263,8 +267,9 @@ if [[ $status_7 -ne 0 ]]; then
   exit 1
 fi
 
-assert_contains "$(cat "$fzf_input_file")" "[session] api"
+assert_contains "$(cat "$fzf_input_file")" $'\033[36m[session] api\033[0m'
 assert_contains "$(cat "$fzf_input_file")" "[project] $target_dir"
+assert_contains "$(cat "$fzf_args_file")" "--ansi"
 assert_contains "$(cat "$tmux_log")" "switch-client -t api"
 printf 'ok 7 - no-arg interactive can fuzzy-switch existing tmux sessions\n'
 
