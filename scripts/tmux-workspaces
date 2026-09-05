@@ -12,6 +12,7 @@ LAYOUT_NAME=""
 LAYOUT_FILE_ARG=""
 LAYOUT_REQUESTED=0
 SESSION_MODE=0
+POPUP_MODE=0
 SESSION_NAME_ARG=""
 SPEC_TARGET=""
 
@@ -26,6 +27,7 @@ Options:
   --layout --file <path>
                          Use explicit YAML layout file path from anywhere
   -s, --session [name]  Fuzzy-pick an active tmux session, or switch to name
+  --popup              Fill an existing tmux popup without an inner border
   -h, --help            Show this help
 
 Examples:
@@ -106,6 +108,10 @@ parse_args() {
 
   while [[ $# -gt 0 ]]; do
     case "$1" in
+      --popup)
+        POPUP_MODE=1
+        shift
+        ;;
       -h|--help)
         usage
         exit 0
@@ -299,13 +305,21 @@ collect_project_picker_candidates() {
   done < <(collect_project_candidates)
 }
 
+run_fzf() {
+  if [[ "$POPUP_MODE" -eq 1 ]]; then
+    fzf "$@" --layout=reverse --no-height --border=none --margin=0 --padding=0
+  else
+    fzf "$@" --height=40% --layout=reverse --border
+  fi
+}
+
 select_with_fzf() {
   local selection
   selection="$(
     {
       collect_session_picker_candidates
       collect_project_picker_candidates
-    } | fzf --ansi --prompt='workspace> ' --height=40% --layout=reverse --border || true
+    } | run_fzf --ansi --prompt='workspace> ' || true
   )"
   if [[ -n "$selection" ]]; then
     printf '%s\n' "$selection"
@@ -314,7 +328,7 @@ select_with_fzf() {
 
 select_session_with_fzf() {
   local selection
-  selection="$(collect_tmux_sessions | fzf --prompt='session> ' --height=40% --layout=reverse --border || true)"
+  selection="$(collect_tmux_sessions | run_fzf --prompt='session> ' || true)"
   if [[ -n "$selection" ]]; then
     printf '%s\n' "$selection"
   fi

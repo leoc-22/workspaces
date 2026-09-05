@@ -65,13 +65,15 @@ Use a tmux popup to open the interactive picker without first switching to an
 empty terminal:
 
 ```tmux
-bind-key C-w display-popup -E -w 50% -h 28% "tmux-workspaces"
+bind-key C-w display-popup -E -w 50% -h 28% "tmux-workspaces --popup"
 ```
 
 Add the binding to `~/.tmux.conf`, then reload the configuration. Press the
 tmux prefix followed by `Ctrl-w` to open the picker. `-E` closes the popup
 when the command exits, while `-w 50%` and `-h 28%` set the popup width and
-height relative to the tmux client.
+height relative to the tmux client. `--popup` makes fzf fill the popup and removes
+its inner border. Regular terminal use keeps the bordered, 40%-height picker.
+For sessions only, use `"tmux-workspaces --popup --session"`.
 
 This form requires `tmux-workspaces` to be available on the shell `PATH` used
 by tmux. Otherwise, replace `"tmux-workspaces"` with the script's absolute
@@ -100,6 +102,7 @@ path.
 | `--layout --file <path>` | Use a specific YAML layout file. The path can point anywhere and is resolved exactly as supplied. |
 | `-s`, `--session [name]` | Switch to an active tmux session. With no name, opens an interactive `fzf` picker over active sessions. |
 | `-h`, `--help` | Show help. |
+| `--popup` | Fill an existing tmux popup and use its border. Works with either interactive picker. |
 
 Notes:
 
