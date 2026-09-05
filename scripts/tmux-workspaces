@@ -10,13 +10,11 @@ GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspaces/layouts"
 
 LAYOUT_NAME=""
 LAYOUT_FILE_ARG=""
-LAYOUT_REQUESTED=0
 SESSION_MODE=0
 POPUP_MODE=0
 SESSION_NAME_ARG=""
-SPEC_TARGET=""
-
-declare -a INPUT_ARGS=()
+TARGET_ARG=""
+TARGET_PROVIDED=0
 
 usage() {
   cat <<'EOF'
@@ -24,8 +22,7 @@ Usage: tmux-workspaces [options] [project-name-or-directory]
 
 Options:
   -l, --layout <name>   Use ~/.config/tmux-workspaces/layouts/<name>.yaml (or .yml)
-  --layout --file <path>
-                         Use explicit YAML layout file path from anywhere
+  -f, --file <path>     Use an explicit YAML layout file
   -s, --session [name]  Fuzzy-pick an active tmux session, or switch to name
   --popup              Fill an existing tmux popup without an inner border
   -h, --help            Show this help
@@ -37,13 +34,13 @@ Examples:
   tmux-workspaces --session
   tmux-workspaces --session my-app
   tmux-workspaces --layout dev
-  tmux-workspaces --layout --file ~/layouts/cow.yaml
+  tmux-workspaces --file ~/layouts/cow.yaml
 
 Notes:
   - No args (interactive): opens an fzf picker for sessions and projects; cancel exits.
   - No args (non-interactive): uses current dir.
   - --session only switches to active tmux sessions; it does not create projects.
-  - With --layout and no target: uses session.dir from YAML when present, otherwise current dir.
+  - With --layout or --file and no target: uses session.dir from YAML when present, otherwise current dir.
   - Single target: YAML layout or default windows.
 EOF
 }
@@ -60,15 +57,6 @@ trim() {
   printf '%s\n' "$value"
 }
 
-unnull() {
-  local value="$1"
-  if [[ "$value" == "null" ]]; then
-    printf '\n'
-    return
-  fi
-  printf '%s\n' "$value"
-}
-
 expand_path() {
   local raw_path="$1"
 
@@ -77,7 +65,7 @@ expand_path() {
       printf '%s\n' "$HOME"
       ;;
     "~/"*)
-      printf '%s/%s\n' "$HOME" "${raw_path#~/}"
+      printf '%s/%s\n' "$HOME" "${raw_path#\~/}"
       ;;
     *)
       printf '%s\n' "$raw_path"
@@ -103,9 +91,14 @@ normalize_name() {
   printf '%s\n' "$normalized"
 }
 
-parse_args() {
-  INPUT_ARGS=()
+set_target() {
+  [[ "$TARGET_PROVIDED" -eq 0 ]] || fail "only one target is supported"
+  [[ -n "$1" ]] || fail "target cannot be empty"
+  TARGET_ARG="$1"
+  TARGET_PROVIDED=1
+}
 
+parse_args() {
   while [[ $# -gt 0 ]]; do
     case "$1" in
       --popup)
@@ -116,36 +109,29 @@ parse_args() {
         usage
         exit 0
         ;;
-      -l|--layout)
-        LAYOUT_REQUESTED=1
-        if [[ $# -lt 2 ]]; then
-          fail "missing value for --layout"
-        fi
-        case "$2" in
-          -f|--file|--file=*)
-            shift
-            ;;
-          -*)
-            fail "invalid --layout value: $2"
-            ;;
-          *)
-            LAYOUT_NAME="$(trim "$2")"
-            [[ -z "$LAYOUT_NAME" ]] && fail "missing value for --layout"
-            shift 2
-            ;;
+      -l|--layout|-f|--file)
+        [[ $# -ge 2 && -n "$2" && "$2" != -* ]] || fail "missing value for $1"
+        case "$1" in
+          -l|--layout) LAYOUT_NAME="$2" ;;
+          -f|--file) LAYOUT_FILE_ARG="$2" ;;
         esac
+        shift 2
         ;;
       --layout=*)
-        LAYOUT_REQUESTED=1
-        LAYOUT_NAME="$(trim "${1#*=}")"
-        [[ -z "$LAYOUT_NAME" ]] && fail "missing value for --layout"
+        LAYOUT_NAME="${1#*=}"
+        [[ -n "$LAYOUT_NAME" ]] || fail "missing value for --layout"
+        shift
+        ;;
+      --file=*)
+        LAYOUT_FILE_ARG="${1#*=}"
+        [[ -n "$LAYOUT_FILE_ARG" ]] || fail "missing value for --file"
         shift
         ;;
       -s|--session)
         SESSION_MODE=1
         if [[ $# -ge 2 && "$2" != -* ]]; then
-          SESSION_NAME_ARG="$(trim "$2")"
-          [[ -z "$SESSION_NAME_ARG" ]] && fail "missing value for --session"
+          SESSION_NAME_ARG="$2"
+          [[ -n "$SESSION_NAME_ARG" ]] || fail "missing value for --session"
           shift 2
         else
           shift
@@ -153,70 +139,36 @@ parse_args() {
         ;;
       --session=*)
         SESSION_MODE=1
-        SESSION_NAME_ARG="$(trim "${1#*=}")"
-        [[ -z "$SESSION_NAME_ARG" ]] && fail "missing value for --session"
-        shift
-        ;;
-      -f|--file)
-        [[ $# -lt 2 ]] && fail "missing value for $1"
-        LAYOUT_FILE_ARG="$(trim "$2")"
-        [[ -z "$LAYOUT_FILE_ARG" ]] && fail "missing value for --file"
-        shift 2
-        ;;
-      --file=*)
-        LAYOUT_FILE_ARG="$(trim "${1#*=}")"
-        [[ -z "$LAYOUT_FILE_ARG" ]] && fail "missing value for --file"
+        SESSION_NAME_ARG="${1#*=}"
+        [[ -n "$SESSION_NAME_ARG" ]] || fail "missing value for --session"
         shift
         ;;
       --)
         shift
         while [[ $# -gt 0 ]]; do
-          INPUT_ARGS+=("$1")
+          set_target "$1"
           shift
         done
         ;;
-      -*)
-        fail "unknown option: $1"
-        ;;
+      -*) fail "unknown option: $1" ;;
       *)
-        INPUT_ARGS+=("$1")
+        set_target "$1"
         shift
         ;;
     esac
   done
 
   if [[ -n "$LAYOUT_NAME" && -n "$LAYOUT_FILE_ARG" ]]; then
-    fail "use either --layout <name> or --layout --file <path>, not both"
+    fail "use either --layout <name> or --file <path>, not both"
   fi
-
-  if [[ -n "$LAYOUT_FILE_ARG" && "$LAYOUT_REQUESTED" -ne 1 ]]; then
-    fail "use --layout --file for explicit layout files"
-  fi
-
   if [[ "$SESSION_MODE" -eq 1 ]]; then
-    if [[ -n "$LAYOUT_NAME" || -n "$LAYOUT_FILE_ARG" || "$LAYOUT_REQUESTED" -eq 1 ]]; then
-      fail "--session cannot be combined with --layout"
+    if [[ -n "$LAYOUT_NAME" || -n "$LAYOUT_FILE_ARG" ]]; then
+      fail "--session cannot be combined with --layout or --file"
     fi
-
-    if [[ ${#INPUT_ARGS[@]} -gt 0 ]]; then
-      fail "--session accepts at most one session name"
-    fi
+    [[ "$TARGET_PROVIDED" -eq 0 ]] || fail "--session accepts at most one session name"
   fi
-
-  if [[ -n "$LAYOUT_NAME" && "$LAYOUT_NAME" == "null" ]]; then
-    fail "invalid --layout value"
-  fi
-
-  if [[ -n "$LAYOUT_NAME" && "$LAYOUT_NAME" == -* ]]; then
-    fail "invalid --layout value: $LAYOUT_NAME"
-  fi
-
-  if [[ -n "$LAYOUT_NAME" && "$LAYOUT_NAME" == */* ]]; then
-    fail "--layout accepts a layout name only; use --layout --file for paths"
-  fi
-
-  if [[ -n "$LAYOUT_FILE_ARG" && "$LAYOUT_FILE_ARG" == "null" ]]; then
-    fail "invalid --file value"
+  if [[ "$LAYOUT_NAME" == -* || "$LAYOUT_NAME" == */* ]]; then
+    fail "--layout accepts a layout name only; use --file for paths"
   fi
 }
 
@@ -352,16 +304,6 @@ switch_to_session() {
   exec tmux attach-session -t "$session_name"
 }
 
-parse_target_spec() {
-  local input="$1"
-
-  if [[ "$input" == *"::"* ]]; then
-    fail "inline target commands are not supported"
-  fi
-
-  SPEC_TARGET="$(trim "$input")"
-}
-
 run_window_command() {
   local tmux_target="$1"
   local command="$2"
@@ -374,43 +316,22 @@ run_window_command() {
   tmux send-keys -t "$tmux_target" "$command" C-m
 }
 
-run_split_panes() {
+run_split_pane() {
   local window_target="$1"
   local window_dir="$2"
-  shift 2
-  local split_spec
-  local split_cmd
+  local direction="$3"
+  local command="$4"
   local split_flag
   local pane_id
 
-  for split_spec in "$@"; do
-    split_spec="$(trim "$split_spec")"
-    if [[ -z "$split_spec" ]]; then
-      continue
-    fi
-
-    split_flag="-v"
-    split_cmd="$split_spec"
-
-    case "$split_spec" in
-      h:*)
-        split_flag="-v"
-        split_cmd="${split_spec#h:}"
-        ;;
-      v:*)
-        split_flag="-h"
-        split_cmd="${split_spec#v:}"
-        ;;
-    esac
-
-    split_cmd="$(trim "$split_cmd")"
-    if [[ -z "$split_cmd" ]]; then
-      continue
-    fi
-
-    pane_id="$(tmux split-window "$split_flag" -d -P -F '#{pane_id}' -t "$window_target" -c "$window_dir")"
-    tmux send-keys -t "$pane_id" "$split_cmd" C-m
-  done
+  case "$direction" in
+    h) split_flag="-v" ;;
+    v) split_flag="-h" ;;
+    *) fail "pane split must be h (top/bottom) or v (left/right)" ;;
+  esac
+  [[ -n "$command" ]] || return 0
+  pane_id="$(tmux split-window "$split_flag" -d -P -F '#{pane_id}' -t "$window_target" -c "$window_dir")"
+  run_window_command "$pane_id" "$command"
 }
 
 resolve_layout_dir() {
@@ -427,7 +348,7 @@ resolve_layout_dir() {
       candidate="$HOME"
       ;;
     "~/"*)
-      candidate="$HOME/${raw_dir#~/}"
+      candidate="$HOME/${raw_dir#\~/}"
       ;;
     /*)
       candidate="$raw_dir"
@@ -448,6 +369,21 @@ require_yq() {
   if ! command -v yq >/dev/null 2>&1; then
     fail "yq is required for YAML layouts"
   fi
+}
+
+validate_layout() {
+  local layout_file="$1"
+  local errors
+  require_yq
+  errors="$(yq e -r '[
+    {"invalid": ((.windows | tag) != "!!seq" or (.windows | length) == 0), "message": "windows must be a nonempty list"},
+    {"invalid": ([(.session, .windows[]) | select(tag == "!!map") | select(has("path"))] | length > 0), "message": "rename path to dir"},
+    {"invalid": ([(.windows[], .windows[].panes[]?) | select(tag == "!!map") | select(has("run"))] | length > 0), "message": "rename run to command"},
+    {"invalid": ([.windows[].panes[]? | select(tag != "!!map")] | length > 0), "message": "panes must be objects with command and optional split"},
+    {"invalid": ([.windows[].panes[]? | select(tag == "!!map") | select((.split // "h") != "h" and (.split // "h") != "v")] | length > 0), "message": "pane split must be h (top/bottom) or v (left/right)"}
+  ] | .[] | select(.invalid) | .message' "$layout_file")" || fail "invalid YAML layout: $layout_file"
+  [[ -z "$errors" ]] || fail "invalid layout $layout_file:
+$errors"
 }
 
 resolve_layout_file_arg() {
@@ -535,9 +471,8 @@ yaml_session_name_override() {
   local layout_file="$1"
   local value
 
-  require_yq
   value="$(yq e -r '.session.name // ""' "$layout_file")"
-  value="$(trim "$(unnull "$value")")"
+  value="$(trim "$value")"
 
   if [[ -z "$value" ]]; then
     printf '\n'
@@ -557,9 +492,8 @@ yaml_session_target_dir() {
   local value
   local target_dir
 
-  require_yq
-  value="$(yq e -r '.session.dir // .session.path // ""' "$layout_file")"
-  value="$(trim "$(unnull "$value")")"
+  value="$(yq e -r '.session.dir // ""' "$layout_file")"
+  value="$(trim "$value")"
 
   if [[ -z "$value" ]]; then
     printf '\n'
@@ -578,7 +512,6 @@ create_session_from_yaml_layout() {
   local session_name="$1"
   local target_dir="$2"
   local layout_file="$3"
-  local created=0
   local window_index=1
   local window_count
   local pane_count
@@ -588,35 +521,26 @@ create_session_from_yaml_layout() {
   local raw_dir
   local resolved_dir
   local command
-  local pane_tag
   local pane_command
   local pane_split
-  local pane_spec
-
-  require_yq
 
   window_count="$(yq e '(.windows // []) | length' "$layout_file")"
-  if ! [[ "$window_count" =~ ^[0-9]+$ ]] || [[ "$window_count" -eq 0 ]]; then
-    fail "YAML layout must define at least one window: $layout_file"
-  fi
-
   for ((i = 0; i < window_count; i++)); do
     name="$(yq e -r ".windows[$i].name // \"\"" "$layout_file")"
-    name="$(trim "$(unnull "$name")")"
+    name="$(trim "$name")"
     if [[ -z "$name" ]]; then
       fail "missing windows[$i].name in $layout_file"
     fi
 
-    raw_dir="$(yq e -r ".windows[$i].dir // .windows[$i].path // \".\"" "$layout_file")"
-    raw_dir="$(trim "$(unnull "$raw_dir")")"
+    raw_dir="$(yq e -r ".windows[$i].dir // \".\"" "$layout_file")"
+    raw_dir="$(trim "$raw_dir")"
     resolved_dir="$(resolve_layout_dir "$target_dir" "$raw_dir")"
 
-    command="$(yq e -r ".windows[$i].command // .windows[$i].run // \"\"" "$layout_file")"
-    command="$(trim "$(unnull "$command")")"
+    command="$(yq e -r ".windows[$i].command // \"\"" "$layout_file")"
+    command="$(trim "$command")"
 
-    if [[ $created -eq 0 ]]; then
+    if [[ $i -eq 0 ]]; then
       tmux new-session -d -s "$session_name" -n "$name" -c "$resolved_dir"
-      created=1
     else
       tmux new-window -t "$session_name:" -n "$name" -c "$resolved_dir"
     fi
@@ -629,103 +553,13 @@ create_session_from_yaml_layout() {
     fi
 
     for ((j = 0; j < pane_count; j++)); do
-      pane_tag="$(yq e -r ".windows[$i].panes[$j] | tag" "$layout_file")"
-      if [[ "$pane_tag" == "!!map" ]]; then
-        pane_command="$(yq e -r ".windows[$i].panes[$j].command // .windows[$i].panes[$j].run // \"\"" "$layout_file")"
-      else
-        pane_command="$(yq e -r ".windows[$i].panes[$j]" "$layout_file")"
-      fi
-      pane_command="$(trim "$(unnull "$pane_command")")"
-      if [[ -z "$pane_command" ]]; then
-        continue
-      fi
-
-      if [[ "$pane_tag" == "!!map" ]]; then
-        pane_split="$(yq e -r ".windows[$i].panes[$j].split // \"h\"" "$layout_file")"
-      else
-        pane_split="h"
-      fi
-      pane_split="$(trim "$(unnull "$pane_split")")"
-
-      case "$pane_split" in
-        v|vertical|left-right)
-          pane_spec="v:$pane_command"
-          ;;
-        h|horizontal|top-bottom|"" )
-          pane_spec="h:$pane_command"
-          ;;
-        h:*|v:*)
-          pane_spec="$pane_split"
-          ;;
-        *)
-          pane_spec="h:$pane_command"
-          ;;
-      esac
-
-      run_split_panes "$session_name:$window_index" "$resolved_dir" "$pane_spec"
+      pane_command="$(yq e -r ".windows[$i].panes[$j].command // \"\"" "$layout_file")"
+      pane_command="$(trim "$pane_command")"
+      pane_split="$(yq e -r ".windows[$i].panes[$j].split // \"h\"" "$layout_file")"
+      run_split_pane "$session_name:$window_index" "$resolved_dir" "$pane_split" "$pane_command"
     done
 
     window_index=$((window_index + 1))
-  done
-
-  tmux select-window -t "$session_name:1"
-}
-
-window_name_for_dir() {
-  local target_dir="$1"
-  local name
-
-  name="$(normalize_name "$(basename "$target_dir")")"
-  if [[ -z "$name" ]]; then
-    name="window"
-  fi
-  printf '%s\n' "$name"
-}
-
-name_in_list() {
-  local needle="$1"
-  shift
-  local value
-
-  for value in "$@"; do
-    if [[ "$value" == "$needle" ]]; then
-      return 0
-    fi
-  done
-  return 1
-}
-
-unique_window_name() {
-  local base_name="$1"
-  shift
-  local candidate="$base_name"
-  local suffix=2
-
-  while name_in_list "$candidate" "$@"; do
-    candidate="$base_name-$suffix"
-    suffix=$((suffix + 1))
-  done
-
-  printf '%s\n' "$candidate"
-}
-
-create_session_from_targets() {
-  local session_name="$1"
-  local -a used_names=()
-  local i
-  local window_name
-
-  for ((i = 0; i < ${#TARGETS[@]}; i++)); do
-    window_name="$(unique_window_name "$(window_name_for_dir "${TARGETS[$i]}")" "${used_names[@]}")"
-
-    if [[ $i -eq 0 ]]; then
-      tmux new-session -d -s "$session_name" -n "$window_name" -c "${TARGETS[$i]}"
-    else
-      tmux new-window -t "$session_name:" -n "$window_name" -c "${TARGETS[$i]}"
-    fi
-
-    used_names+=("$window_name")
-    run_window_command "$session_name:$((i + 1))" "${COMMANDS[$i]}"
   done
 
   tmux select-window -t "$session_name:1"
@@ -748,31 +582,6 @@ session_name_for_target() {
   fi
 
   printf '%s\n' "$session_name"
-}
-
-session_name_for_multi_targets() {
-  local -a target_dirs=("$@")
-  local joined=""
-  local target_dir
-  local session_name
-
-  for target_dir in "${target_dirs[@]}"; do
-    joined+="$(basename "$target_dir")-"
-  done
-
-  joined="${joined%-}"
-  session_name="$(normalize_name "$joined")"
-
-  if [[ -z "$session_name" ]]; then
-    session_name="workspace"
-  fi
-
-  if [[ ${#session_name} -gt 48 ]]; then
-    session_name="${session_name:0:48}"
-    session_name="${session_name%-}"
-  fi
-
-  printf 'ws-%s\n' "$session_name"
 }
 
 parse_args "$@"
@@ -800,52 +609,20 @@ if [[ "$SESSION_MODE" -eq 1 ]]; then
   switch_to_session "$SESSION_NAME_ARG"
 fi
 
-inputs=("${INPUT_ARGS[@]-}")
-target_from_command=0
-if [[ ${#inputs[@]} -eq 1 && -z "${inputs[0]}" ]]; then
-  inputs=()
-fi
-if [[ ${#inputs[@]} -gt 0 ]]; then
-  target_from_command=1
-fi
-if [[ ${#inputs[@]} -eq 0 ]]; then
-  if [[ -n "$LAYOUT_NAME" || -n "$LAYOUT_FILE_ARG" ]]; then
-    inputs=("")
-  elif [[ -t 0 && -t 1 ]]; then
-    if ! command -v fzf >/dev/null 2>&1; then
-      fail "fzf is required when no target is provided"
-    fi
-
-    selected="$(select_with_fzf)"
-    if [[ -z "$selected" ]]; then
-      exit 0
-    fi
-
-    case "$selected" in
-      "[session] "*)
-        switch_to_session "${selected#"[session] "}"
-        ;;
-      "[project] "*)
-        inputs=("${selected#"[project] "}")
-        target_from_command=1
-        ;;
-      *)
-        inputs=("$selected")
-        target_from_command=1
-        ;;
-    esac
-  else
-    inputs=("")
+if [[ "$TARGET_PROVIDED" -eq 0 && -z "$LAYOUT_NAME" && -z "$LAYOUT_FILE_ARG" && -t 0 && -t 1 ]]; then
+  if ! command -v fzf >/dev/null 2>&1; then
+    fail "fzf is required when no target is provided"
   fi
+  selected="$(select_with_fzf)"
+  [[ -n "$selected" ]] || exit 0
+  case "$selected" in
+    "[session] "*) switch_to_session "${selected#"[session] "}" ;;
+    "[project] "*) set_target "${selected#"[project] "}" ;;
+    *) fail "invalid picker selection: $selected" ;;
+  esac
 fi
 
-if [[ ${#inputs[@]} -gt 1 ]]; then
-  fail "only one target is supported"
-fi
-
-parse_target_spec "${inputs[0]}"
-
-target="$(resolve_target "$SPEC_TARGET")"
+target="$(resolve_target "$TARGET_ARG")"
 if [[ ! -d "$target" ]]; then
   fail "project directory not found: $target"
 fi
@@ -853,8 +630,11 @@ fi
 target="$(cd "$target" && pwd -P)"
 
 yaml_layout_file="$(resolve_yaml_layout_file "$target")"
+if [[ -n "$yaml_layout_file" ]]; then
+  validate_layout "$yaml_layout_file"
+fi
 
-if [[ -n "$yaml_layout_file" && "$target_from_command" -eq 0 ]]; then
+if [[ -n "$yaml_layout_file" && "$TARGET_PROVIDED" -eq 0 ]]; then
   session_target="$(yaml_session_target_dir "$yaml_layout_file")"
   if [[ -n "$session_target" ]]; then
     target="$session_target"

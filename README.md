@@ -1,265 +1,128 @@
 # tmux-workspaces
 
-`tmux-workspaces` is a tmux workspace launcher inspired by ThePrimeagen's sessionizer.
+A small tmux workspace launcher. Pick an existing session or a project directory,
+or launch a saved layout with windows, commands, and panes.
 
 ## Install
 
-The command is the `scripts/tmux-workspaces` shell script. Add the repo's `scripts` directory to your `PATH`.
+Requires Bash, tmux, and fzf for interactive selection. YAML layouts also require
+[Mike Farah's yq v4](https://github.com/mikefarah/yq). zoxide is optional for
+looking up project names.
 
-Fish (current shell):
+On macOS:
 
-```fish
-set -gx PATH /Users/leoc/Developer/tmux-workspaces/scripts $PATH
+```sh
+brew install tmux fzf yq
 ```
 
-Fish (persist):
+Add this repository's `scripts` directory to your PATH. For Fish, run this from
+the repository root:
 
 ```fish
-fish_add_path /Users/leoc/Developer/tmux-workspaces/scripts
-```
-
-Check command path:
-
-```fish
+fish_add_path "$PWD/scripts"
 type -a tmux-workspaces
 ```
 
-The command should appear as `tmux-workspaces`.
+For other shells, add the absolute path to `scripts` to your shell's PATH
+configuration. To uninstall, remove that PATH entry.
 
-## Uninstall (Fish)
+## Commands
 
-Remove persisted PATH entry:
+| Command | Behavior |
+| --- | --- |
+| `tmux-workspaces` | Pick an active session or project. Without an interactive terminal, use the current directory. |
+| `tmux-workspaces <project-or-directory>` | Open or create that project's workspace. Use `.` for the current directory. |
+| `tmux-workspaces --session [name]` | Switch to an existing session, or pick from sessions only when no name is supplied. |
+| `tmux-workspaces --layout <name> [target]` | Use a named layout from `~/.config/tmux-workspaces/layouts/`. |
+| `tmux-workspaces --file <path> [target]` | Use a specific YAML file. Relative file paths resolve from the current directory. |
+| `tmux-workspaces --popup` | Fill an existing tmux popup without an inner border. Also works with `--session`. |
+| `tmux-workspaces --help` | Show command help. |
 
-```fish
-set -l target /Users/leoc/Developer/tmux-workspaces/scripts
-set -l i (contains -i -- $target $fish_user_paths)
-if test -n "$i"
-    set -e fish_user_paths[$i]
-end
-```
+Short options are `-s`, `-l`, `-f`, and `-h`. Value options also accept
+`--option=value`. Use `--` before a target beginning with a dash.
 
-Remove from current shell PATH too:
+Only one target is accepted. `--layout` and `--file` are alternatives; neither
+can be combined with `--session`. Cancelling either picker exits successfully.
+Session selection switches clients inside tmux and attaches outside tmux.
 
-```fish
-set -gx PATH (string match -v -- $target $PATH)
-```
+## Popup shortcut
 
-If you manually added `set -gx PATH .../scripts $PATH` in `~/.config/fish/config.fish`, remove that line.
-
-## Usage
-
-```bash
-tmux-workspaces
-tmux-workspaces my-app
-tmux-workspaces ../shared-lib
-tmux-workspaces --session
-tmux-workspaces --session my-app
-tmux-workspaces --layout dev
-tmux-workspaces --layout --file ~/layouts/cow.yaml
-tmux-workspaces --help
-```
-
-### Open the picker from tmux
-
-Use a tmux popup to open the interactive picker without first switching to an
-empty terminal:
+Add this to `~/.tmux.conf` and reload the configuration:
 
 ```tmux
 bind-key C-w display-popup -E -w 50% -h 28% "tmux-workspaces --popup"
 ```
 
-Add the binding to `~/.tmux.conf`, then reload the configuration. Press the
-tmux prefix followed by `Ctrl-w` to open the picker. `-E` closes the popup
-when the command exits, while `-w 50%` and `-h 28%` set the popup width and
-height relative to the tmux client. `--popup` makes fzf fill the popup and removes
-its inner border. Regular terminal use keeps the bordered, 40%-height picker.
-For sessions only, use `"tmux-workspaces --popup --session"`.
+Press your tmux prefix followed by Ctrl-W. tmux sets the popup size; `--popup`
+makes fzf fill it. Regular terminal use keeps a bordered, 40%-height picker.
+The command must be on tmux's shell PATH, or use its absolute path in the binding.
 
-This form requires `tmux-workspaces` to be available on the shell `PATH` used
-by tmux. Otherwise, replace `"tmux-workspaces"` with the script's absolute
-path.
+## Project and layout lookup
 
-## Command Modes
+Project targets resolve through an explicit path, an existing local directory,
+an optional zoxide match, then `~/Developer/<name>`.
+The picker lists immediate subdirectories of `~/Developer`. Set
+`PROJ_SEARCH_DIRS` to a colon-separated list of roots to search elsewhere.
 
-`tmux-workspaces` supports one target per invocation. A target can be a project name or a directory path.
+An explicit `--layout` or `--file` takes precedence. Otherwise the launcher looks
+for `.tmux-workspaces/layout.yaml` or `.yml` in the project. Without a layout,
+it creates three windows: `editor`, `shell`, and `runtime`.
+Named layouts also accept `.yaml` or `.yml`, with `.yaml` preferred.
 
-| Command | Mode | Behavior |
-| --- | --- | --- |
-| `tmux-workspaces` | Interactive picker | Opens `fzf` when running in an interactive terminal. Active tmux sessions and project directories are both listed. Choosing a session switches to it; choosing a project opens or creates its workspace. Cancel exits without error. |
-| `tmux-workspaces` | Current directory | In non-interactive use, uses the current directory. |
-| `tmux-workspaces <target>` | Target workspace | Resolves `<target>` to a directory, then uses project-local layout if present, otherwise default windows. |
-| `tmux-workspaces --session` | Interactive session picker | Opens `fzf` over active tmux sessions only, then switches or attaches to the selected session. Cancel exits without error. |
-| `tmux-workspaces --session <name>` | Direct session switch | Switches or attaches to an existing tmux session by name. Fails if the session does not exist. |
-| `tmux-workspaces --layout <name> [target]` | Named layout | Loads `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. If no target is given, uses `session.dir` from the layout when present, otherwise the current directory. |
-| `tmux-workspaces --layout --file <path> [target]` | Explicit layout file | Loads the YAML file at `<path>` from anywhere. If no target is given, uses `session.dir` from the layout when present, otherwise the current directory. |
-| `tmux-workspaces --help` | Help | Prints command help. |
+With a layout and no target, `session.dir` supplies the project directory,
+otherwise the current directory is used. An explicit or picker-selected project
+always overrides `session.dir`. Existing sessions are reused; layouts run only
+when creating a session.
 
-## Options
-
-| Option | Meaning |
-| --- | --- |
-| `--layout <name>` | Use a named global layout from `~/.config/tmux-workspaces/layouts/<name>.yaml` or `.yml`. The value must be a layout name, not a path. |
-| `--layout --file <path>` | Use a specific YAML layout file. The path can point anywhere and is resolved exactly as supplied. |
-| `-s`, `--session [name]` | Switch to an active tmux session. With no name, opens an interactive `fzf` picker over active sessions. |
-| `-h`, `--help` | Show help. |
-| `--popup` | Fill an existing tmux popup and use its border. Works with either interactive picker. |
-
-Notes:
-
-- `--file <path>` by itself is not a valid mode; use `--layout --file <path>`.
-- `--session` cannot be combined with `--layout`; it only targets already-running tmux sessions.
-- `--layout` modes skip `fzf` when no target is provided and use `session.dir` from the layout when present, otherwise the current directory.
-- A target passed on the command line overrides `session.dir`.
-- Only one target is supported per command invocation.
-
-## Resolution Order
-
-When a target is provided, it resolves to a directory in this order:
-
-1. explicit path (`.`, `..`, `./...`, `../...`, `/...`, `~/...`)
-2. existing local directory in current working directory
-3. `zoxide` match (`zoxide query <name>`) when available
-4. fallback to `~/Developer/<name>`
-
-In single-target mode, the layout is selected in this order:
-
-1. `--layout --file <path>`: explicit YAML file from anywhere
-2. `--layout <name>`: global named layout from `~/.config/tmux-workspaces/layouts/`
-3. auto-detect project-local `.tmux-workspaces/layout.yaml` or `.tmux-workspaces/layout.yml` in the target directory
-4. built-in default windows (`editor`, `shell`, `runtime`)
-
-## YAML layout (recommended)
-
-YAML supports named layouts, windows, startup commands, and panes.
-
-There are two different YAML layout sources:
-
-- Project-local layout: `.tmux-workspaces/layout.yaml` (or `.tmux-workspaces/layout.yml`) inside the target directory
-  - Auto-detected when you run `tmux-workspaces <target>` without `--layout`
-  - Best for project-specific setup that should live with that repo
-- Global named layout: `~/.config/tmux-workspaces/layouts/<name>.yaml` (or `.yml`)
-  - Used only when you pass `--layout <name>`
-  - Best for reusable templates shared across multiple projects
-
-In short: `.tmux-workspaces/layout.yaml` is automatic per project; `~/.config/tmux-workspaces/layouts/*.yaml` is opt-in via `--layout`.
-
-Recommended structure:
-
-```text
-~/.config/tmux-workspaces/
-  layouts/
-    dev.yaml
-    debug.yaml
-    staging.yaml
-
-my-workspace/
-  .tmux-workspaces/
-    layout.yaml
-```
-
-YAML schema:
+## YAML layouts
 
 ```yaml
 session:
-  name: optional-session-name       # optional
-  dir: ~/Developer/my-workspace     # optional; target directory for the session
-  path: ~/Developer/my-workspace    # optional alias for session.dir
+  name: my-stack
+  dir: ~/Developer/my-app
 windows:
-  - name: window-name               # required
-    dir: ~/Developer/some-repo      # optional; defaults to target directory
-    path: ~/Developer/some-repo     # optional alias for dir
-    command: pnpm dev               # optional
-    run: pnpm dev                   # optional alias for command
-    panes:
-      - mysql ...                   # string form; split defaults to h
-      - split: h                    # optional; h/top-bottom or v/left-right
-        command: tail -f log.txt
-      - split: v
-        run: pnpm test              # run is an alias for command
-```
-
-Field reference:
-
-| Field | Required | Meaning |
-| --- | --- | --- |
-| `session.name` | No | Overrides the derived tmux session name. The value is normalized before use. |
-| `session.dir` | No | Target directory for the session. Used when the command does not pass a target. |
-| `session.path` | No | Alias for `session.dir`. Used only when `dir` is not set. |
-| `windows` | Yes | List of windows to create. Must contain at least one item. |
-| `windows[].name` | Yes | tmux window name. |
-| `windows[].dir` | No | Working directory for the window. Defaults to the selected target directory. |
-| `windows[].path` | No | Alias for `windows[].dir`. Used only when `dir` is not set. |
-| `windows[].command` | No | Command sent to the window after it is created. |
-| `windows[].run` | No | Alias for `windows[].command`. Used only when `command` is not set. |
-| `windows[].panes` | No | Extra panes to split from the window. Each item can be a command string or a map. |
-| `windows[].panes[]` | No | String form pane command. Uses horizontal split (`h`). |
-| `windows[].panes[].command` | No | Command sent to the pane after it is created. Empty commands are skipped. |
-| `windows[].panes[].run` | No | Alias for pane `command`. Used only when `command` is not set. |
-| `windows[].panes[].split` | No | Split direction. Supported values: `h`, `horizontal`, `top-bottom`, `v`, `vertical`, `left-right`. Defaults to `h`. |
-
-Split directions:
-
-- `h`, `horizontal`, `top-bottom`: create a top/bottom tmux split.
-- `v`, `vertical`, `left-right`: create a left/right tmux split.
-
-Cow/cob/cos example:
-
-See `examples/layout.yaml` for this example in the repo.
-
-```yaml
-session:
-  name: cow-stack
-windows:
-  - name: cow
-    dir: ~/Developer/cow
-    command: z cow && pnpm dev
-  - name: cob
-    dir: ~/Developer/cob
-    command: z cob && pnpm dev
-  - name: cos
-    dir: ~/Developer/cos
-    command: z cos && ./gradlew bootRun
+  - name: editor
+    command: nvim
+  - name: runtime
+    dir: backend
+    command: pnpm dev
     panes:
       - split: h
-        command: mysql -P 3301 --protocol=tcp -u root -ppaymenow
+        command: tail -f app.log
+      - split: v
+        command: pnpm test
 ```
 
-## External Dependencies
+| Field | Meaning |
+| --- | --- |
+| `session.name` | Optional override for the session name derived from the project path. |
+| `session.dir` | Optional project directory when no target is supplied. |
+| `windows` | Nonempty list of windows. Each window needs a `name`. |
+| `windows[].dir` | Working directory, relative to the project unless absolute or `~/…`. Defaults to the project directory. |
+| `windows[].command` | Optional startup command. |
+| `windows[].panes` | Optional list of objects with `command` and optional `split`. Empty commands are skipped. |
+| `windows[].panes[].split` | `h` for top/bottom (default), or `v` for left/right. |
 
-- `tmux` (required): session/window management
-- `yq` (required for YAML layouts): parse project-local `.tmux-workspaces/layout.yaml` and global named layouts
-- `fzf` (required for interactive no-arg mode): picker for `tmux-workspaces` with no arguments
-- `zoxide` (optional): smart directory match for `tmux-workspaces <name>`
+See [examples/layout.yaml](examples/layout.yaml) for a layout spanning projects.
 
-Install (macOS/Homebrew):
+### Migrating older commands and layouts
 
-```bash
-brew install tmux yq fzf
-```
+- Replace `--layout --file <path>` with `--file <path>`.
+- Rename YAML `path` fields to `dir`, and `run` fields to `command`.
+- Replace string panes such as `- nvim` with `- command: nvim`.
+- Replace `horizontal` or `top-bottom` with `h`; replace `vertical` or
+  `left-right` with `v`.
+- Move commands embedded in `split: h:command` or `split: v:command` into the
+  separate `command` field.
 
-Optional (`zoxide`):
+Removed YAML forms produce an error before session creation.
 
-```bash
-brew install zoxide
-```
+## Tests
 
-Install (Ubuntu/Debian):
-
-```bash
-sudo apt update
-sudo apt install -y tmux yq fzf
-```
-
-Optional (`zoxide`):
-
-```bash
-sudo apt install -y zoxide
-```
-
-## Regression Test
-
-Run the tiny shell regression harness:
-
-```bash
+```sh
 bash tests/tmux-workspaces-regression.sh
 ```
+
+Tests use real yq v4 to parse YAML and stub tmux, fzf, and zoxide to avoid changing
+live sessions or consulting your directory history. Interactive cases use a
+pseudo-terminal. They verify command behavior, not the rendered fzf appearance.
