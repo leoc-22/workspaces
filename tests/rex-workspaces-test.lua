@@ -18,29 +18,18 @@ local function sh(command)
   return { stdout = stdout, ok = code == "0", code = tonumber(code) }
 end
 
-local calls, sessions, focused_pwd, session_results, block_results
+local calls, sessions, focused_pwd
 local function reset()
-  calls, sessions, focused_pwd, session_results, block_results = {}, {}, nil, {}, {}
+  calls, sessions, focused_pwd = {}, {}, nil
 end
-reset()
 
 rex = {
-  exec = function(argv, opts)
-    opts = opts or {}
+  exec = function(argv)
     local quoted = {}
     for i, word in ipairs(argv) do
       quoted[i] = shell_quote(word)
     end
-    local command = table.concat(quoted, " ")
-    if opts.cwd ~= nil then
-      command = "cd " .. shell_quote(opts.cwd) .. " && " .. command
-    end
-    if opts.stdin ~= nil then
-      command = "printf '%s' " .. shell_quote(opts.stdin) .. " | (" .. command .. ")"
-    end
-    local r = sh("{ (" .. command .. ") 2>&1; }")
-    r.stderr = r.ok and "" or r.stdout
-    return r
+    return sh(table.concat(quoted, " "))
   end,
   call = function(method, args)
     table.insert(calls, { method = method, args = args })
@@ -57,16 +46,13 @@ rex = {
     __index = function(_, method)
       return function(args)
         table.insert(calls, { method = "session." .. method, args = args })
-        return session_results[method] or {}
+        return {}
       end
     end,
   }),
   block = {
-    call = function(_, method, args)
-      if method == "pwd" then
-        return { pwd = focused_pwd }
-      end
-      return block_results[args.block_id][method]
+    call = function()
+      return { pwd = focused_pwd }
     end,
   },
   client = {
@@ -291,64 +277,6 @@ layout_error("old split", "windows:\n  - name: a\n    panes:\n      - split: hor
 layout_error("no name", "windows:\n  - command: x\n", "missing windows[0].name")
 layout_error("bad dir", "windows:\n  - name: a\n    dir: nope\n", "layout directory not found")
 layout_error("bad name", "session:\n  name: '---'\nwindows:\n  - name: a\n", "invalid session.name")
-
--- A renamed session is still found by its workspace name.
-reset()
-sessions = { { label = "my-app-v2", session_id = "session:other" }, { label = "my-app: fix-auth", session_id = "session:renamed" } }
-check("renamed reused", ws.open({}, { dir = "My App" }).session_id, "session:renamed")
-
--- Rename labels.
-check("summary words", ws.summary_label("Fix the Login Redirect Bug!\n", nil), "fix-the-login-redirect")
-check("summary strips prefix", ws.summary_label("stack-auth-refactor", "stack"), "auth-refactor")
-check("summary empty", ws.summary_label("...", "stack"), "")
-check("prefix kept", ws.rename_prefix("stack: old-work", {}), "stack")
-
-assert(sh("mkdir -p " .. shell_quote(app .. "/src") .. " && git -C " .. shell_quote(app) .. " init -q").ok)
-local panes = { { dir = app .. "/src" }, { dir = app }, { dir = tmp .. "/cwd" } }
-check("prefix from repo", ws.rename_prefix("quiet-meadow", panes), "stack")
-check("prefix none", ws.rename_prefix("quiet-meadow", {}), nil)
-
--- rename_session sends the panes to claude and sets "project: summary".
-local fake_claude = tmp .. "/fake-claude"
-write(fake_claude, "#!/bin/sh\ncat > " .. shell_quote(tmp .. "/prompt.txt") .. "\necho 'Stack Auth Refactor'\n")
-assert(sh("chmod +x " .. shell_quote(fake_claude)).ok)
-ws.config.claude = fake_claude
-
-local function terminal(cwd, program, screen)
-  return {
-    process = { foreground = { cwd = cwd, argv0 = program } },
-    title = { title = program .. " title" },
-    format = { content = screen },
-  }
-end
-
-reset()
-session_results.view = { label = "quiet-meadow", windows = { { window_id = "w1", label = "editor" }, { window_id = "w2", label = "runtime" } } }
-session_results.list_blocks = { blocks = {
-  { block_id = "b1", window_id = "w1", creator_name = "com.superlogical.terminal", placement = "placed" },
-  { block_id = "b2", window_id = "w2", creator_name = "com.superlogical.terminal", placement = "placed" },
-  { block_id = "b3", window_id = "w2", creator_name = "com.superlogical.terminal", placement = "detached" },
-} }
-block_results = {
-  b1 = terminal(app .. "/src", "nvim", "auth.ts\n\n  middleware\n"),
-  b2 = terminal(app, "pnpm", "compiled"),
-}
-result = ws.rename({}, {})
-check("rename label", result.label, "stack: auth-refactor")
-check("rename set", find_call("session.set_label").label, "stack: auth-refactor")
-local prompt = assert(io.open(tmp .. "/prompt.txt")):read("*a")
-check("prompt window", prompt:find("## Window editor", 1, true) ~= nil, true)
-check("prompt program", prompt:find("Program: pnpm", 1, true) ~= nil, true)
-check("prompt screen", prompt:find("auth.ts\n  middleware", 1, true) ~= nil, true)
-
-write(fake_claude, "#!/bin/sh\necho 'rate limited' >&2\nexit 1\n")
-reset()
-session_results.view = { label = "x", windows = {} }
-session_results.list_blocks = { blocks = { { block_id = "b1", creator_name = "com.superlogical.terminal", placement = "placed" } } }
-block_results = { b1 = terminal(app, "zsh", "") }
-ok, err = pcall(ws.rename, {}, {})
-check("claude failure", ok == false and tostring(err):find("claude failed: rate limited", 1, true) ~= nil, true)
-check("claude failure no rename", find_call("session.set_label"), nil)
 
 cleanup()
 

@@ -20,14 +20,7 @@ M.config = {
   layouts_dir = HOME .. "/.config/tmux-workspaces/layouts",
   zoxide = "zoxide",
   yq = "yq",
-  rename_action = "rename_session",
-  claude = "claude",
-  rename_model = "haiku",
 }
-
-local RENAME_PROMPT = "You name terminal sessions. Reply with only a 2-4 word lowercase " ..
-  "kebab-case label for the task the panes show, such as fix-login-redirect. " ..
-  "Name the work, not the tools. No other text."
 
 local LAYOUT_FILES = { ".tmux-workspaces/layout.yaml", ".tmux-workspaces/layout.yml" }
 
@@ -138,15 +131,13 @@ local function focused_dir(ctx)
   return url_decode(path)
 end
 
--- Matches the workspace name alone or with a summary from rename_session,
--- as in "stack: auth-refactor".
 local function find_session(label)
   local r, err = rex.call("session.list")
   if r == nil then
     error(err, 0)
   end
   for _, session in ipairs(r.sessions or {}) do
-    if session.label == label or (session.label or ""):sub(1, #label + 2) == label .. ": " then
+    if session.label == label then
       return session.session_id
     end
   end
@@ -384,133 +375,6 @@ function M.open(ctx, args)
   return { session_id = s.session_id, created = true }
 end
 
-local function last_lines(text, count)
-  local lines = {}
-  for line in (text or ""):gmatch("[^\n]+") do
-    if line:find("%S") then
-      table.insert(lines, line)
-    end
-  end
-  return table.concat(lines, "\n", math.max(1, #lines - count + 1))
-end
-
--- Describes each terminal pane: its window, directory, program, title, and
--- the end of its screen.
-function M.describe_panes()
-  local view, err = rex.session.view{}
-  if view == nil then
-    error(err, 0)
-  end
-  local window_labels = {}
-  for _, window in ipairs(view.windows or {}) do
-    window_labels[window.window_id] = window.label
-  end
-
-  local blocks = rex.session.list_blocks{}
-  local panes = {}
-  for _, block in ipairs(blocks and blocks.blocks or {}) do
-    if block.creator_name == TERMINAL and block.placement == "placed" then
-      local id = { block_id = block.block_id }
-      local process = rex.block.call(TERMINAL, "process", id) or {}
-      local foreground = process.foreground or {}
-      local title = rex.block.call(TERMINAL, "title", id) or {}
-      local screen = rex.block.call(TERMINAL, "format", { block_id = block.block_id, trim = true }) or {}
-      table.insert(panes, {
-        window = window_labels[block.window_id] or "",
-        dir = foreground.cwd,
-        program = foreground.argv0 or foreground.name,
-        title = title.title,
-        screen = last_lines(screen.content, 15),
-      })
-    end
-  end
-  return panes
-end
-
-function M.rename_prompt(panes)
-  local parts = {}
-  for _, pane in ipairs(panes) do
-    table.insert(parts, ("## Window %s\nDirectory: %s\nProgram: %s\nTitle: %s\nScreen:\n%s"):format(
-      pane.window, pane.dir or "", pane.program or "", pane.title or "", pane.screen))
-  end
-  return table.concat(parts, "\n\n")
-end
-
-local function git_root(dir)
-  local r = rex.exec({ "git", "rev-parse", "--show-toplevel" }, { cwd = dir })
-  if r == nil or not r.ok then
-    return nil
-  end
-  return trim(r.stdout)
-end
-
--- The project part of the label: kept from an earlier rename, otherwise the
--- workspace name of the repository most panes are in.
-function M.rename_prefix(current, panes)
-  local kept = (current or ""):match("^(.-): ")
-  if kept ~= nil and kept ~= "" then
-    return kept
-  end
-  local counts, best, best_count = {}, nil, 0
-  for _, pane in ipairs(panes) do
-    if pane.dir ~= nil then
-      local dir = git_root(pane.dir) or pane.dir
-      counts[dir] = (counts[dir] or 0) + 1
-      if counts[dir] > best_count then
-        best, best_count = dir, counts[dir]
-      end
-    end
-  end
-  return best and M.session_name_for(best, M.config.project_root)
-end
-
-function M.summary_label(reply, prefix)
-  local words = {}
-  for word in M.normalize_name(reply or ""):gmatch("[^-]+") do
-    if #words < 4 then
-      table.insert(words, word)
-    end
-  end
-  local summary = table.concat(words, "-")
-  if prefix ~= nil and summary:sub(1, #prefix + 1) == prefix .. "-" then
-    summary = summary:sub(#prefix + 2)
-  end
-  return summary
-end
-
-function M.rename(ctx, args)
-  local panes = M.describe_panes()
-  if #panes == 0 then
-    error("no terminal panes to summarize", 0)
-  end
-
-  local r, err = rex.exec({
-    M.config.claude, "-p", "--model", M.config.rename_model,
-    "--no-session-persistence", "--tools", "", "--strict-mcp-config",
-    "--system-prompt", RENAME_PROMPT, "Label this terminal session.",
-  }, { stdin = M.rename_prompt(panes), timeout = 25 })
-  if r == nil then
-    error("could not run " .. M.config.claude .. ": " .. err, 0)
-  end
-  if not r.ok then
-    error("claude failed: " .. trim(r.stderr ~= "" and r.stderr or r.stdout), 0)
-  end
-
-  local view = rex.session.view{} or {}
-  local prefix = M.rename_prefix(view.label, panes)
-  local summary = M.summary_label(r.stdout, prefix)
-  if summary == "" then
-    error("claude returned no usable label: " .. trim(r.stdout), 0)
-  end
-  local label = prefix and (prefix .. ": " .. summary) or summary
-
-  local ok, set_err = rex.session.set_label{ label = label }
-  if ok == nil then
-    error(set_err, 0)
-  end
-  return { label = label }
-end
-
 function M.setup(opts)
   for key, value in pairs(opts or {}) do
     M.config[key] = value
@@ -522,13 +386,6 @@ function M.setup(opts)
     keywords = "tmux-workspaces project layout",
     args = { dir = "string?", layout = "string?", file = "string?" },
     run = M.open,
-  }
-  rex.action{
-    name = M.config.rename_action,
-    title = "Rename Session from Work",
-    description = "Ask Claude to name the session after the work in its panes.",
-    keywords = "label summarize claude haiku",
-    run = M.rename,
   }
 end
 
