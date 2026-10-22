@@ -1,11 +1,11 @@
--- Rex port of tmux-workspaces: open a project as a Rex session with
+-- Rex version of the workspaces launcher: open a project as a Rex session with
 -- ai, editor, and shell windows, or with a YAML layout, reusing the
 -- session when it exists.
 --
 -- Load it from ~/.config/rex/init.lua:
 --
---   package.path = "/path/to/tmux-workspaces/rex/?.lua;" .. package.path
---   require("tmux_workspaces").setup()
+--   package.path = "/path/to/workspaces/rex/?.lua;" .. package.path
+--   require("workspaces").setup()
 
 local M = {}
 
@@ -17,13 +17,13 @@ M.config = {
   action = "workspace",
   project_root = HOME .. "/Developer",
   window_names = { "ai", "editor", "shell" },
-  layouts_dir = HOME .. "/.config/tmux-workspaces/layouts",
+  layouts_dir = HOME .. "/.config/workspaces/layouts",
   zoxide = "zoxide",
   yq = "yq",
   shell = nil, -- the panes' shell, such as /opt/homebrew/bin/fish; nil uses the login shell
 }
 
-local LAYOUT_FILES = { ".tmux-workspaces/layout.yaml", ".tmux-workspaces/layout.yml" }
+local LAYOUT_FILES = { ".workspaces/layout.yaml", ".workspaces/layout.yml" }
 
 local function trim(value)
   return (value:gsub("^%s+", ""):gsub("%s+$", ""))
@@ -162,7 +162,7 @@ function M.default_windows(dir)
 end
 
 -- Finds the layout file: an explicit file (relative to base), a named layout,
--- then the project's own .tmux-workspaces/layout.yaml or .yml.
+-- then the project's own .workspaces/layout.yaml or .yml.
 function M.find_layout_file(args, base, target)
   if args.file ~= nil then
     local path = M.expand_path(args.file)
@@ -360,7 +360,7 @@ function M.open(ctx, args)
     error(err, 0)
   end
 
-  -- session.create activates the last window; tmux-workspaces starts on the
+  -- session.create activates the last window; the tmux launcher starts on the
   -- first. Scripts run with rex do must attach to focus a window; actions in
   -- the configuration file have no attach.
   local first = s.initial_windows[1].window_id
@@ -384,7 +384,7 @@ function M.setup(opts)
     name = M.config.action,
     title = "Open Workspace",
     description = "Open a project as a session from its YAML layout, or with ai, editor, and shell windows.",
-    keywords = "tmux-workspaces project layout",
+    keywords = "workspaces project layout",
     args = { dir = "string?", layout = "string?", file = "string?" },
     run = M.open,
   }

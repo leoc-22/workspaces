@@ -4,9 +4,9 @@ set -euo pipefail
 
 DEFAULT_PROJECT_ROOT="$HOME/Developer"
 DEFAULT_WINDOW_NAMES=(ai editor shell)
-DEFAULT_YAML_LAYOUT_FILE=".tmux-workspaces/layout.yaml"
-DEFAULT_YAML_LAYOUT_FILE_ALT=".tmux-workspaces/layout.yml"
-GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspaces/layouts"
+DEFAULT_YAML_LAYOUT_FILE=".workspaces/layout.yaml"
+DEFAULT_YAML_LAYOUT_FILE_ALT=".workspaces/layout.yml"
+GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/workspaces/layouts"
 
 LAYOUT_NAME=""
 LAYOUT_FILE_ARG=""
@@ -18,23 +18,23 @@ TARGET_PROVIDED=0
 
 usage() {
   cat <<'EOF'
-Usage: tmux-workspaces [options] [project-name-or-directory]
+Usage: workspaces [options] [project-name-or-directory]
 
 Options:
-  -l, --layout <name>   Use ~/.config/tmux-workspaces/layouts/<name>.yaml (or .yml)
+  -l, --layout <name>   Use ~/.config/workspaces/layouts/<name>.yaml (or .yml)
   -f, --file <path>     Use an explicit YAML layout file
   -s, --session [name]  Fuzzy-pick an active tmux session, or switch to name
   --popup              Fill an existing tmux popup without an inner border
   -h, --help            Show this help
 
 Examples:
-  tmux-workspaces
-  tmux-workspaces my-app
-  tmux-workspaces ../shared-lib
-  tmux-workspaces --session
-  tmux-workspaces --session my-app
-  tmux-workspaces --layout dev
-  tmux-workspaces --file ~/layouts/cow.yaml
+  workspaces
+  workspaces my-app
+  workspaces ../shared-lib
+  workspaces --session
+  workspaces --session my-app
+  workspaces --layout dev
+  workspaces --file ~/layouts/cow.yaml
 
 Notes:
   - No args (interactive): opens an fzf picker for sessions and projects; cancel exits.
@@ -46,7 +46,7 @@ EOF
 }
 
 fail() {
-  printf 'tmux-workspaces: %s\n' "$1" >&2
+  printf 'workspaces: %s\n' "$1" >&2
   exit 1
 }
 
