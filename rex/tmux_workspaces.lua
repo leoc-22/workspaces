@@ -12,24 +12,10 @@ local M = {}
 local SHELL = "com.superlogical.terminal.shell"
 local TERMINAL = "com.superlogical.terminal"
 local HOME = os.getenv("HOME") or ""
--- The directory require found this module in, which also holds the picker.
-local MODULE_DIR = (function()
-  for template in package.path:gmatch("[^;]+") do
-    local path = template:gsub("%?", "tmux_workspaces")
-    local file = io.open(path)
-    if file ~= nil then
-      file:close()
-      return path:match("^(.*)/[^/]+$")
-    end
-  end
-  return "."
-end)()
 
 M.config = {
   action = "workspace",
-  picker_action = "workspace_picker",
   project_root = HOME .. "/Developer",
-  search_dirs = nil, -- picker roots; defaults to { project_root }
   window_names = { "editor", "shell", "runtime" },
   layouts_dir = HOME .. "/.config/tmux-workspaces/layouts",
   zoxide = "zoxide",
@@ -389,38 +375,6 @@ function M.open(ctx, args)
   return { session_id = s.session_id, created = true }
 end
 
--- The app that ran the action, so the picker can switch it to the workspace.
--- From the CLI there is none, and rex picks the app itself.
-local function app_client(ctx)
-  local r = rex.call("client.list")
-  for _, client in ipairs(r and r.clients or {}) do
-    if client.client_id == ctx.client_id and client.info and client.info.kind == "app" then
-      return client.client_id
-    end
-  end
-  return ""
-end
-
--- Opens fzf over the project directories in a floating pane. The pane runs
--- the workspace action for the pick, then closes.
-function M.picker(ctx, args)
-  local argv = { "/bin/sh", MODULE_DIR .. "/workspace-picker.sh", app_client(ctx) }
-  for _, dir in ipairs(M.config.search_dirs or { M.config.project_root }) do
-    table.insert(argv, M.expand_path(dir))
-  end
-  local layer, err = rex.session.new_layer{
-    bounds = { 0.2, 0.2, 0.6, 0.5 },
-    layout = rex.layout.block{
-      flavor = SHELL,
-      label = "workspace picker",
-      options = { command = argv, cwd = HOME },
-    },
-  }
-  if layer == nil then
-    error(err, 0)
-  end
-end
-
 function M.setup(opts)
   for key, value in pairs(opts or {}) do
     M.config[key] = value
@@ -432,13 +386,6 @@ function M.setup(opts)
     keywords = "tmux-workspaces project layout",
     args = { dir = "string?", layout = "string?", file = "string?" },
     run = M.open,
-  }
-  rex.action{
-    name = M.config.picker_action,
-    title = "Find Workspace…",
-    description = "Fuzzy-find a project directory and open it as a workspace.",
-    keywords = "tmux-workspaces project fzf picker",
-    run = M.picker,
   }
 end
 

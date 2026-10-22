@@ -149,24 +149,10 @@ with the same errors. Without one, the session gets `editor`, `shell`, and
 `runtime` windows. Commands are typed into each pane's shell, and panes split
 the window's first pane in order, matching the tmux layout.
 
-`setup` accepts overrides for `action`, `picker_action`, `project_root`,
-`search_dirs`, `window_names`, `layouts_dir`, and the `zoxide` and `yq` programs
-to run. The Rex server may not
+`setup` accepts overrides for `action`, `project_root`, `window_names`,
+`layouts_dir`, and the `zoxide` and `yq` programs to run. The Rex server may not
 inherit your shell's PATH, so give absolute paths such as
 `/opt/homebrew/bin/yq` if needed.
-
-The `workspace_picker` action ("Find Workspace…") replaces the fzf project
-picker. It opens fzf in a floating pane over the directories in `project_root`,
-or in each of `search_dirs` when set, and opens the pick with `workspace`:
-
-```lua
-rex.bind("cmd+option+o", "workspace_picker")
-```
-
-Press Escape to close it. The pane switches the app to the new session through
-the `rex` CLI, so turn on Remote Control in Rex's Settings under Rex Server.
-Without it the session is still created, and the pane shows the error. fzf and
-`rex` must be on your login shell's PATH.
 
 For session switching, Rex's built-in picker replaces `--session`:
 
