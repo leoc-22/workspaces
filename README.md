@@ -124,11 +124,21 @@ Removed YAML forms produce an error before session creation.
 
 `rex/tmux_workspaces.lua` brings the workspace launcher to the
 [Rex](https://www.superlogical.com/rex/docs) terminal as a custom action named
-`workspace`. Load it from `~/.config/rex/init.lua`, using the absolute path to
-this repository:
+`workspace`. To create `~/.config/rex/init.lua` from
+[rex/init.example.lua](rex/init.example.lua), run this from the repository root
+in Fish, Bash, or Zsh:
+
+```sh
+mkdir -p ~/.config/rex
+test -e ~/.config/rex/init.lua || sed "s|/path/to/tmux-workspaces|$PWD|" rex/init.example.lua > ~/.config/rex/init.lua
+```
+
+It fills in this repository's path and doesn't touch an existing `init.lua`. If
+you already have one, append the example instead by changing `>` to `>>`. The
+result looks like this:
 
 ```lua
-package.path = "/path/to/tmux-workspaces/rex/?.lua;" .. package.path
+package.path = "/Users/you/Developer/tmux-workspaces/rex/?.lua;" .. package.path
 require("tmux_workspaces").setup{
   yq = "/opt/homebrew/bin/yq",
   zoxide = "/opt/homebrew/bin/zoxide",
