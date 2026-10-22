@@ -1,7 +1,8 @@
 # workspaces
 
-A small tmux workspace launcher. Pick an existing session or a project directory,
-or launch a saved layout with windows, commands, and panes.
+A small project workspace launcher for [tmux](#install) and [Rex](#rex). Open a
+project as a session with `ai`, `editor`, and `shell` windows, or launch a saved
+YAML layout with windows, commands, and panes. Both use the same layouts.
 
 ## Install
 
