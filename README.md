@@ -108,18 +108,6 @@ windows:
 
 See [examples/layout.yaml](examples/layout.yaml) for a layout spanning projects.
 
-### Migrating older commands and layouts
-
-- Replace `--layout --file <path>` with `--file <path>`.
-- Rename YAML `path` fields to `dir`, and `run` fields to `command`.
-- Replace string panes such as `- nvim` with `- command: nvim`.
-- Replace `horizontal` or `top-bottom` with `h`; replace `vertical` or
-  `left-right` with `v`.
-- Move commands embedded in `split: h:command` or `split: v:command` into the
-  separate `command` field.
-
-Removed YAML forms produce an error before session creation.
-
 ## Rex
 
 `rex/workspaces.lua` brings the workspace launcher to the
