@@ -36,6 +36,9 @@ rex = {
     if method == "session.list" then
       return { sessions = sessions }
     end
+    if method ~= "session.create" then
+      return {}
+    end
     local windows = {}
     for i in ipairs(args.initial_windows) do
       windows[i] = { window_id = "window:" .. i }
@@ -148,7 +151,9 @@ for i, name in ipairs({ "ai", "editor", "shell" }) do
   check("window " .. i .. " cwd", window.layout.block.options.cwd, tmp .. "/Developer/My App")
   check("window " .. i .. " no input", window.layout.block.options.initial_input, nil)
 end
+check("attach to focus", find_call("session.attach").session_id, "session:new")
 check("focus first", find_call("session.focus_window").window_id, "window:1")
+check("detach after focus", find_call("session.detach").session_id, "session:new")
 check("select first", find_call("client.session.select").window_id, "window:1")
 
 -- No target uses the focused terminal's directory.
