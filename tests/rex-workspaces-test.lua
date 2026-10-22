@@ -226,6 +226,19 @@ check("inner direction", inner.direction, "horizontal")
 check("inner pane", inner.after.block.options.initial_input, "pnpm test\r")
 check("main pane", inner.before.block.options.initial_input, "pnpm dev\r")
 check("main label", inner.before.block.label, "runtime")
+check("default shell", inner.before.block.options.shell, nil)
+
+-- The shell option applies to every pane.
+ws.config.shell = "/opt/homebrew/bin/fish"
+reset()
+ws.open({}, { dir = app })
+runtime = find_call("session.create").initial_windows[2].layout.split
+check("shell main pane", runtime.before.split.before.block.options.shell, "/opt/homebrew/bin/fish")
+check("shell split pane", runtime.after.block.options.shell, "/opt/homebrew/bin/fish")
+reset()
+ws.open({}, { dir = tmp .. "/cwd" })
+check("shell default window", find_call("session.create").initial_windows[1].layout.block.options.shell, "/opt/homebrew/bin/fish")
+ws.config.shell = nil
 
 -- session.name and session.dir; an explicit target overrides session.dir.
 ws.config.layouts_dir = tmp .. "/layouts"

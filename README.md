@@ -184,6 +184,13 @@ the window's first pane in order, matching the tmux layout.
 `setup` accepts overrides for `action` (the action's name), `project_root`,
 `window_names`, `layouts_dir`, and the `zoxide` and `yq` programs to run.
 
+The panes run your account's login shell unless you set `shell`. If Rex runs a
+different shell in your other panes, such as Fish, set it to match:
+
+```lua
+require("tmux_workspaces").setup{ shell = "/opt/homebrew/bin/fish" }
+```
+
 There is no Rex equivalent of the project picker. For switching sessions, Rex's
 built-in "Change Session…" picker replaces `--session`; bind it to a free key
 with `rex.bind("<key>", "session.switch")`.
