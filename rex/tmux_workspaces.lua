@@ -1,5 +1,5 @@
 -- Rex port of tmux-workspaces: open a project as a Rex session with
--- editor, shell, and runtime windows, or with a YAML layout, reusing the
+-- ai, editor, and shell windows, or with a YAML layout, reusing the
 -- session when it exists.
 --
 -- Load it from ~/.config/rex/init.lua:
@@ -16,7 +16,7 @@ local HOME = os.getenv("HOME") or ""
 M.config = {
   action = "workspace",
   project_root = HOME .. "/Developer",
-  window_names = { "editor", "shell", "runtime" },
+  window_names = { "ai", "editor", "shell" },
   layouts_dir = HOME .. "/.config/tmux-workspaces/layouts",
   zoxide = "zoxide",
   yq = "yq",
@@ -382,7 +382,7 @@ function M.setup(opts)
   rex.action{
     name = M.config.action,
     title = "Open Workspace",
-    description = "Open a project as a session from its YAML layout, or with editor, shell, and runtime windows.",
+    description = "Open a project as a session from its YAML layout, or with ai, editor, and shell windows.",
     keywords = "tmux-workspaces project layout",
     args = { dir = "string?", layout = "string?", file = "string?" },
     run = M.open,

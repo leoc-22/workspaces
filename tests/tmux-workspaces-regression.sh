@@ -225,9 +225,9 @@ ok 'literal paths preserve spaces and accept ::'
 
 FZF_SELECTION="[project] $target_dir" TMUX_HAS_SESSION_STATUS=1 expect 0 run_tty --popup
 assert_contains "$(cat "$tmux_log")" "-c $target_dir"
+assert_contains "$(cat "$tmux_log")" '-n ai'
 assert_contains "$(cat "$tmux_log")" '-n editor'
 assert_contains "$(cat "$tmux_log")" '-n shell'
-assert_contains "$(cat "$tmux_log")" '-n runtime'
 ok 'picker-selected projects create the default workspace'
 
 (

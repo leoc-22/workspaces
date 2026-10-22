@@ -3,7 +3,7 @@
 set -euo pipefail
 
 DEFAULT_PROJECT_ROOT="$HOME/Developer"
-DEFAULT_WINDOW_NAMES=(editor shell runtime)
+DEFAULT_WINDOW_NAMES=(ai editor shell)
 DEFAULT_YAML_LAYOUT_FILE=".tmux-workspaces/layout.yaml"
 DEFAULT_YAML_LAYOUT_FILE_ALT=".tmux-workspaces/layout.yml"
 GLOBAL_YAML_LAYOUTS_DIR="$HOME/.config/tmux-workspaces/layouts"

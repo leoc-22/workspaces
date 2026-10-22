@@ -69,7 +69,7 @@ The picker lists immediate subdirectories of `~/Developer`. Set
 
 An explicit `--layout` or `--file` takes precedence. Otherwise the launcher looks
 for `.tmux-workspaces/layout.yaml` or `.yml` in the project. Without a layout,
-it creates three windows: `editor`, `shell`, and `runtime`.
+it creates three windows: `ai`, `editor`, and `shell`.
 Named layouts also accept `.yaml` or `.yml`, with `.yaml` preferred.
 
 With a layout and no target, `session.dir` supplies the project directory,
@@ -167,8 +167,8 @@ optional zoxide match, then `~/Developer/<name>`. Relative `file` paths also
 resolve from the focused terminal.
 
 [YAML layouts](#yaml-layouts) work as they do with tmux, found the same way and
-with the same errors. Without one, the session gets `editor`, `shell`, and
-`runtime` windows. Commands are typed into each pane's shell, and panes split
+with the same errors. Without one, the session gets `ai`, `editor`, and
+`shell` windows. Commands are typed into each pane's shell, and panes split
 the window's first pane in order, matching the tmux layout.
 
 `setup` accepts overrides for `action` (the action's name), `project_root`,

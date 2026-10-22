@@ -134,7 +134,7 @@ check("resolve local", ws.resolve_target("local", tmp .. "/cwd"), tmp .. "/cwd/l
 check("resolve project", ws.resolve_target("My App", tmp .. "/cwd"), tmp .. "/Developer/My App")
 check("resolve absolute", ws.resolve_target("/srv", tmp .. "/cwd"), "/srv")
 
--- Creates a session with three windows rooted in the project, focused on editor.
+-- Creates a session with three windows rooted in the project, focused on the first.
 reset()
 focused_pwd = "file://host" .. tmp:gsub(" ", "%%20") .. "/cwd"
 local result = ws.open({ block_id = "block:1" }, { dir = "My App" })
@@ -142,7 +142,7 @@ local create = find_call("session.create")
 check("created", result.created, true)
 check("label", create.label, "my-app")
 check("window count", #create.initial_windows, 3)
-for i, name in ipairs({ "editor", "shell", "runtime" }) do
+for i, name in ipairs({ "ai", "editor", "shell" }) do
   local window = create.initial_windows[i]
   check("window " .. i .. " label", window.window_label, name)
   check("window " .. i .. " cwd", window.layout.block.options.cwd, tmp .. "/Developer/My App")
