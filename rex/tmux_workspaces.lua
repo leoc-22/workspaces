@@ -20,6 +20,7 @@ M.config = {
   layouts_dir = HOME .. "/.config/tmux-workspaces/layouts",
   zoxide = "zoxide",
   yq = "yq",
+  shell = nil, -- the panes' shell, such as /opt/homebrew/bin/fish; nil uses the login shell
 }
 
 local LAYOUT_FILES = { ".tmux-workspaces/layout.yaml", ".tmux-workspaces/layout.yml" }
@@ -145,7 +146,7 @@ local function find_session(label)
 end
 
 local function shell_block(dir, label, command)
-  local options = { cwd = dir }
+  local options = { cwd = dir, shell = M.config.shell }
   if command ~= nil and command ~= "" then
     options.initial_input = command .. "\r"
   end
