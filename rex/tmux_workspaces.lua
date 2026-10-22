@@ -369,11 +369,17 @@ function M.open(ctx, args)
   end
 
   -- session.create activates the last window; tmux-workspaces starts on the
-  -- first. Focusing a window requires attaching to its session.
+  -- first. Scripts run with rex do must attach to focus a window; actions in
+  -- the configuration file have no attach.
   local first = s.initial_windows[1].window_id
-  rex.session.attach{ session_id = s.session_id }
+  local attach = type(rex.session.attach) == "function"
+  if attach then
+    rex.session.attach{ session_id = s.session_id }
+  end
   rex.session.focus_window{ session_id = s.session_id, window_id = first }
-  rex.session.detach{ session_id = s.session_id }
+  if attach then
+    rex.session.detach{ session_id = s.session_id }
+  end
   show(s.session_id, first)
   return { session_id = s.session_id, created = true }
 end
