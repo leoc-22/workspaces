@@ -293,15 +293,15 @@ switch_to_session() {
     fail "missing tmux session name"
   fi
 
-  if ! tmux has-session -t "$session_name" 2>/dev/null; then
+  if ! tmux has-session -t "=$session_name" 2>/dev/null; then
     fail "tmux session not found: $session_name"
   fi
 
   if [[ -n "${TMUX:-}" ]]; then
-    exec tmux switch-client -t "$session_name"
+    exec tmux switch-client -t "=$session_name"
   fi
 
-  exec tmux attach-session -t "$session_name"
+  exec tmux attach-session -t "=$session_name"
 }
 
 run_window_command() {
@@ -456,15 +456,16 @@ create_session_from_default_windows() {
   local session_name="$1"
   local target_dir="$2"
   local -a window_names=("${DEFAULT_WINDOW_NAMES[@]}")
+  local first_window_id
   local i
 
-  tmux new-session -d -s "$session_name" -n "${window_names[0]}" -c "$target_dir"
+  first_window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$session_name" -n "${window_names[0]}" -c "$target_dir")"
 
   for ((i = 1; i < ${#window_names[@]}; i++)); do
-    tmux new-window -t "$session_name:" -n "${window_names[$i]}" -c "$target_dir"
+    tmux new-window -t "=$session_name:" -n "${window_names[$i]}" -c "$target_dir"
   done
 
-  tmux select-window -t "$session_name:1"
+  tmux select-window -t "$first_window_id"
 }
 
 yaml_session_name_override() {
@@ -512,7 +513,8 @@ create_session_from_yaml_layout() {
   local session_name="$1"
   local target_dir="$2"
   local layout_file="$3"
-  local window_index=1
+  local window_id
+  local first_window_id=""
   local window_count
   local pane_count
   local i
@@ -539,13 +541,15 @@ create_session_from_yaml_layout() {
     command="$(yq e -r ".windows[$i].command // \"\"" "$layout_file")"
     command="$(trim "$command")"
 
+    # Target windows by ID so base-index settings don't matter.
     if [[ $i -eq 0 ]]; then
-      tmux new-session -d -s "$session_name" -n "$name" -c "$resolved_dir"
+      window_id="$(tmux new-session -d -P -F '#{window_id}' -s "$session_name" -n "$name" -c "$resolved_dir")"
+      first_window_id="$window_id"
     else
-      tmux new-window -t "$session_name:" -n "$name" -c "$resolved_dir"
+      window_id="$(tmux new-window -P -F '#{window_id}' -t "=$session_name:" -n "$name" -c "$resolved_dir")"
     fi
 
-    run_window_command "$session_name:$window_index" "$command"
+    run_window_command "$window_id" "$command"
 
     pane_count="$(yq e "(.windows[$i].panes // []) | length" "$layout_file")"
     if ! [[ "$pane_count" =~ ^[0-9]+$ ]]; then
@@ -556,13 +560,11 @@ create_session_from_yaml_layout() {
       pane_command="$(yq e -r ".windows[$i].panes[$j].command // \"\"" "$layout_file")"
       pane_command="$(trim "$pane_command")"
       pane_split="$(yq e -r ".windows[$i].panes[$j].split // \"h\"" "$layout_file")"
-      run_split_pane "$session_name:$window_index" "$resolved_dir" "$pane_split" "$pane_command"
+      run_split_pane "$window_id" "$resolved_dir" "$pane_split" "$pane_command"
     done
-
-    window_index=$((window_index + 1))
   done
 
-  tmux select-window -t "$session_name:1"
+  tmux select-window -t "$first_window_id"
 }
 
 session_name_for_target() {
@@ -650,7 +652,7 @@ if [[ -n "$yaml_layout_file" ]]; then
   fi
 fi
 
-if ! tmux has-session -t "$session_name" 2>/dev/null; then
+if ! tmux has-session -t "=$session_name" 2>/dev/null; then
   if [[ -n "$yaml_layout_file" ]]; then
     create_session_from_yaml_layout "$session_name" "$target" "$yaml_layout_file"
   else
@@ -659,7 +661,7 @@ if ! tmux has-session -t "$session_name" 2>/dev/null; then
 fi
 
 if [[ -n "${TMUX:-}" ]]; then
-  exec tmux switch-client -t "$session_name"
+  exec tmux switch-client -t "=$session_name"
 fi
 
-exec tmux attach-session -t "$session_name"
+exec tmux attach-session -t "=$session_name"

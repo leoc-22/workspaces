@@ -37,15 +37,15 @@ if [[ "${1:-}" == "list-sessions" ]]; then
   printf '%s\n' ${TMUX_SESSIONS:-api web}
   exit 0
 fi
-if [[ "${1:-}" == "has-session" ]]; then
-  exit "${TMUX_HAS_SESSION_STATUS:-0}"
-fi
 if [[ -n "${TMUX_MARKER_FILE:-}" ]]; then
   printf '%s\n' "$*" >>"$TMUX_MARKER_FILE"
 fi
-if [[ "${1:-}" == "split-window" ]]; then
-  printf '%%1\n'
-fi
+case "${1:-}" in
+  has-session) exit "${TMUX_HAS_SESSION_STATUS:-0}" ;;
+  split-window) printf '%%1\n' ;;
+  new-session) printf '@1\n' ;;
+  new-window) printf '@2\n' ;;
+esac
 exit 0
 EOF
 
@@ -161,7 +161,7 @@ assert_contains "$(cat "$fzf_args_file")" '--height=40%'
 ok 'normal picker retains compact layout and cancellation succeeds'
 
 TMUX_HAS_SESSION_STATUS=1 expect 0 run_tty --file "$layout_file"
-assert_contains "$(cat "$tmux_log")" 'new-session -d -s fixture'
+assert_contains "$(cat "$tmux_log")" 'new-session -d -P -F #{window_id} -s fixture'
 assert_contains "$(cat "$tmux_log")" "-c $session_target_dir"
 [[ ! -e "$marker_file" ]]
 ok 'real YAML session name and directory are used'
@@ -179,8 +179,13 @@ assert_contains "$log" 'send-keys -t %1 npm ls -g C-m'
 assert_contains "$log" 'send-keys -t %1 nvim C-m'
 assert_contains "$log" 'printf "default split"'
 assert_contains "$log" 'printf "hello: world"'
-assert_contains "$log" 'new-window -t'
+assert_contains "$log" 'new-window -P -F #{window_id} -t ='
 assert_contains "$log" 'printf "second window"'
+assert_contains "$log" 'has-session -t ='
+assert_contains "$log" $'send-keys -t @1 printf "hello: world" C-m'
+assert_contains "$log" $'send-keys -t @2 printf "second window" C-m'
+assert_contains "$log" 'split-window -v -d -P -F #{pane_id} -t @1'
+assert_contains "$log" 'select-window -t @1'
 ok 'real YAML creates multiple windows and both pane directions with intact commands'
 
 FZF_SELECTION='[session] api' TEST_TMUX=/tmp/test-tmux expect 0 run_tty --popup
@@ -189,20 +194,20 @@ assert_contains "$(cat "$fzf_input_file")" "[project] $target_dir"
 assert_contains "$(cat "$fzf_args_file")" '--ansi'
 assert_contains "$(cat "$fzf_args_file")" '--no-height --border=none --margin=0 --padding=0'
 assert_absent "$(cat "$fzf_args_file")" '--height=40%'
-assert_contains "$(cat "$tmux_log")" 'switch-client -t api'
+assert_contains "$(cat "$tmux_log")" 'switch-client -t =api'
 ok 'popup picker fills the popup and switches the selected session'
 
 FZF_SELECTION=web TEST_TMUX=/tmp/test-tmux expect 0 run_tty --popup --session
 assert_contains "$(cat "$fzf_args_file")" '--no-height'
 assert_absent "$(cat "$fzf_input_file")" '[project]'
-assert_contains "$(cat "$tmux_log")" 'switch-client -t web'
+assert_contains "$(cat "$tmux_log")" 'switch-client -t =web'
 ok 'session-only picker also supports popup mode'
 
 TEST_TMUX=/tmp/test-tmux expect 0 run_command -s web
-assert_contains "$(cat "$tmux_log")" 'switch-client -t web'
+assert_contains "$(cat "$tmux_log")" 'switch-client -t =web'
 [[ ! -e "$marker_file" ]]
 expect 0 run_command --session=web
-assert_contains "$(cat "$tmux_log")" 'attach-session -t web'
+assert_contains "$(cat "$tmux_log")" 'attach-session -t =web'
 ok 'direct session selection switches inside tmux and attaches outside'
 
 TMUX_HAS_SESSION_STATUS=1 expect 1 run_command --session missing
@@ -228,6 +233,7 @@ assert_contains "$(cat "$tmux_log")" "-c $target_dir"
 assert_contains "$(cat "$tmux_log")" '-n ai'
 assert_contains "$(cat "$tmux_log")" '-n editor'
 assert_contains "$(cat "$tmux_log")" '-n shell'
+assert_contains "$(cat "$tmux_log")" 'select-window -t @1'
 ok 'picker-selected projects create the default workspace'
 
 (
@@ -253,7 +259,7 @@ ok 'missing arguments fail clearly and session picker cancellation succeeds'
 mkdir -p "$target_dir/.tmux-workspaces"
 printf 'session:\n  name: "null"\nwindows:\n  - name: editor\n' >"$target_dir/.tmux-workspaces/layout.yml"
 TMUX_HAS_SESSION_STATUS=1 expect 0 run_command "$target_dir"
-assert_contains "$(cat "$tmux_log")" 'new-session -d -s null'
+assert_contains "$(cat "$tmux_log")" 'new-session -d -P -F #{window_id} -s null'
 ok 'project-local .yml discovery preserves literal null session name'
 
 cp "$layout_file" "$stub_dir/null"
