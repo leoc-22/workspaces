@@ -78,6 +78,11 @@ otherwise the current directory is used. An explicit or picker-selected project
 always overrides `session.dir`. Existing sessions are reused; layouts run only
 when creating a session.
 
+Sessions are named after the project's path below `~/Developer`, or its full
+path elsewhere, lowercased with each run of other characters replaced by `-`.
+For example, `~/Developer/My App` becomes `my-app` and `/srv/api` becomes
+`srv-api`. A layout's `session.name` overrides this.
+
 ## YAML layouts
 
 ```yaml
@@ -196,7 +201,8 @@ bash tests/workspaces-regression.sh
 luajit tests/rex-workspaces-test.lua
 ```
 
-The shell tests use real yq v4 to parse YAML and stub tmux, fzf, and zoxide to
+The shell tests need yq v4 and `script(1)`, which macOS includes. They use real
+yq to parse YAML and stub tmux, fzf, and zoxide to
 avoid changing live sessions or consulting your directory history. Interactive
 cases use a pseudo-terminal. They verify command behavior, not the rendered fzf
 appearance.
