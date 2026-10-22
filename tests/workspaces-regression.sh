@@ -3,7 +3,7 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
-SCRIPT_PATH="$ROOT_DIR/scripts/tmux-workspaces"
+SCRIPT_PATH="$ROOT_DIR/scripts/workspaces"
 
 if ! command -v yq >/dev/null 2>&1 || ! [[ "$(yq --version)" == *"mikefarah/yq"*"version v4"* ]]; then
   printf 'Mike Farah yq v4 is required for these tests\n' >&2
@@ -250,8 +250,8 @@ expect 0 run_tty --popup --session
 [[ ! -e "$tmux_log" ]]
 ok 'missing arguments fail clearly and session picker cancellation succeeds'
 
-mkdir -p "$target_dir/.tmux-workspaces"
-printf 'session:\n  name: "null"\nwindows:\n  - name: editor\n' >"$target_dir/.tmux-workspaces/layout.yml"
+mkdir -p "$target_dir/.workspaces"
+printf 'session:\n  name: "null"\nwindows:\n  - name: editor\n' >"$target_dir/.workspaces/layout.yml"
 TMUX_HAS_SESSION_STATUS=1 expect 0 run_command "$target_dir"
 assert_contains "$(cat "$tmux_log")" 'new-session -d -s null'
 ok 'project-local .yml discovery preserves literal null session name'

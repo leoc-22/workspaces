@@ -1,4 +1,4 @@
--- Tests for rex/tmux_workspaces.lua. Run with: luajit tests/rex-workspaces-test.lua
+-- Tests for rex/workspaces.lua. Run with: luajit tests/rex-workspaces-test.lua
 --
 -- The rex global is stubbed: rex.exec runs real commands, and server calls
 -- are recorded instead of creating sessions.
@@ -86,7 +86,7 @@ rex = {
   action = function() end,
 }
 
-local ws = require("tmux_workspaces")
+local ws = require("workspaces")
 
 local failures = 0
 local function check(name, got, want)
@@ -189,7 +189,7 @@ end
 
 local app = tmp .. "/Developer/stack"
 assert(sh("mkdir -p " .. shell_quote(app .. "/backend")).ok)
-write(app .. "/.tmux-workspaces/layout.yaml", [[
+write(app .. "/.workspaces/layout.yaml", [[
 windows:
   - name: editor
     command: nvim

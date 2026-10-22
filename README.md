@@ -1,4 +1,4 @@
-# tmux-workspaces
+# workspaces
 
 A small tmux workspace launcher. Pick an existing session or a project directory,
 or launch a saved layout with windows, commands, and panes.
@@ -20,7 +20,7 @@ the repository root:
 
 ```fish
 fish_add_path "$PWD/scripts"
-type -a tmux-workspaces
+type -a workspaces
 ```
 
 For other shells, add the absolute path to `scripts` to your shell's PATH
@@ -33,13 +33,13 @@ YAML layouts and optionally zoxide, but not tmux or fzf.
 
 | Command | Behavior |
 | --- | --- |
-| `tmux-workspaces` | Pick an active session or project. Without an interactive terminal, use the current directory. |
-| `tmux-workspaces <project-or-directory>` | Open or create that project's workspace. Use `.` for the current directory. |
-| `tmux-workspaces --session [name]` | Switch to an existing session, or pick from sessions only when no name is supplied. |
-| `tmux-workspaces --layout <name> [target]` | Use a named layout from `~/.config/tmux-workspaces/layouts/`. |
-| `tmux-workspaces --file <path> [target]` | Use a specific YAML file. Relative file paths resolve from the current directory. |
-| `tmux-workspaces --popup` | Fill an existing tmux popup without an inner border. Also works with `--session`. |
-| `tmux-workspaces --help` | Show command help. |
+| `workspaces` | Pick an active session or project. Without an interactive terminal, use the current directory. |
+| `workspaces <project-or-directory>` | Open or create that project's workspace. Use `.` for the current directory. |
+| `workspaces --session [name]` | Switch to an existing session, or pick from sessions only when no name is supplied. |
+| `workspaces --layout <name> [target]` | Use a named layout from `~/.config/workspaces/layouts/`. |
+| `workspaces --file <path> [target]` | Use a specific YAML file. Relative file paths resolve from the current directory. |
+| `workspaces --popup` | Fill an existing tmux popup without an inner border. Also works with `--session`. |
+| `workspaces --help` | Show command help. |
 
 Short options are `-s`, `-l`, `-f`, and `-h`. Value options also accept
 `--option=value`. Use `--` before a target beginning with a dash.
@@ -53,7 +53,7 @@ Session selection switches clients inside tmux and attaches outside tmux.
 Add this to `~/.tmux.conf` and reload the configuration:
 
 ```tmux
-bind-key C-w display-popup -E -w 50% -h 28% "tmux-workspaces --popup"
+bind-key C-w display-popup -E -w 50% -h 28% "workspaces --popup"
 ```
 
 Press your tmux prefix followed by Ctrl-W. tmux sets the popup size; `--popup`
@@ -68,7 +68,7 @@ The picker lists immediate subdirectories of `~/Developer`. Set
 `PROJ_SEARCH_DIRS` to a colon-separated list of roots to search elsewhere.
 
 An explicit `--layout` or `--file` takes precedence. Otherwise the launcher looks
-for `.tmux-workspaces/layout.yaml` or `.yml` in the project. Without a layout,
+for `.workspaces/layout.yaml` or `.yml` in the project. Without a layout,
 it creates three windows: `ai`, `editor`, and `shell`.
 Named layouts also accept `.yaml` or `.yml`, with `.yaml` preferred.
 
@@ -122,7 +122,7 @@ Removed YAML forms produce an error before session creation.
 
 ## Rex
 
-`rex/tmux_workspaces.lua` brings the workspace launcher to the
+`rex/workspaces.lua` brings the workspace launcher to the
 [Rex](https://www.superlogical.com/rex/docs) terminal as a custom action named
 `workspace`. To create `~/.config/rex/init.lua` from
 [rex/init.example.lua](rex/init.example.lua), run this from the repository root
@@ -130,7 +130,7 @@ in Fish, Bash, or Zsh:
 
 ```sh
 mkdir -p ~/.config/rex
-test -e ~/.config/rex/init.lua || sed "s|/path/to/tmux-workspaces|$PWD|" rex/init.example.lua > ~/.config/rex/init.lua
+test -e ~/.config/rex/init.lua || sed "s|/path/to/workspaces|$PWD|" rex/init.example.lua > ~/.config/rex/init.lua
 ```
 
 It fills in this repository's path and doesn't touch an existing `init.lua`. If
@@ -140,8 +140,8 @@ result looks like this:
 ```lua
 -- Example ~/.config/rex/init.lua. The README's install command fills in
 -- this repository's path below.
-package.path = "/Users/you/Developer/tmux-workspaces/rex/?.lua;" .. package.path
-require("tmux_workspaces").setup{
+package.path = "/Users/you/Developer/workspaces/rex/?.lua;" .. package.path
+require("workspaces").setup{
   yq = "/opt/homebrew/bin/yq",
   zoxide = "/opt/homebrew/bin/zoxide",
   -- shell = "/opt/homebrew/bin/fish", -- leave unset to use your login shell
@@ -172,7 +172,7 @@ project or layout, run the action from the CLI:
 
 ```sh
 rex do workspace                       # the focused terminal's directory
-rex do workspace dir=my-app            # resolved like tmux-workspaces <project>
+rex do workspace dir=my-app            # resolved like workspaces <project>
 rex do workspace layout=dev            # like --layout dev
 rex do workspace file=stack.yaml dir=. # like --file stack.yaml .
 ```
@@ -203,7 +203,7 @@ with `rex.bind("<key>", "session.switch")`.
 ## Tests
 
 ```sh
-bash tests/tmux-workspaces-regression.sh
+bash tests/workspaces-regression.sh
 luajit tests/rex-workspaces-test.lua
 ```
 
