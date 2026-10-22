@@ -26,6 +26,9 @@ type -a tmux-workspaces
 For other shells, add the absolute path to `scripts` to your shell's PATH
 configuration. To uninstall, remove that PATH entry.
 
+To use the launcher in the Rex terminal instead, see [Rex](#rex). It needs yq for
+YAML layouts and optionally zoxide, but not tmux or fzf.
+
 ## Commands
 
 | Command | Behavior |
@@ -120,16 +123,31 @@ Removed YAML forms produce an error before session creation.
 ## Rex
 
 `rex/tmux_workspaces.lua` brings the workspace launcher to the
-[Rex](https://www.superlogical.com/rex/docs) terminal as a custom action. Load it
-from `~/.config/rex/init.lua`, using the absolute path to this repository:
+[Rex](https://www.superlogical.com/rex/docs) terminal as a custom action named
+`workspace`. Load it from `~/.config/rex/init.lua`, using the absolute path to
+this repository:
 
 ```lua
 package.path = "/path/to/tmux-workspaces/rex/?.lua;" .. package.path
-require("tmux_workspaces").setup()
+require("tmux_workspaces").setup{
+  yq = "/opt/homebrew/bin/yq",
+  zoxide = "/opt/homebrew/bin/zoxide",
+}
+rex.bind("cmd+shift+o", "workspace")
 ```
 
-Run `rex config reload`, then search for "Open Workspace" in the command palette
-or run it from the CLI:
+The Rex server may not inherit your shell's PATH, so give absolute paths to yq
+and zoxide; the ones above are Homebrew's on Apple silicon. Bind any key Rex
+doesn't already use. Then load the file and confirm the action is there:
+
+```sh
+rex config check    # exists: yes, actions: 1
+rex config reload
+```
+
+Press the key, or search for "Open Workspace" in the command palette. Both open
+the focused terminal's directory, since neither passes arguments. To choose a
+project or layout, run the action from the CLI:
 
 ```sh
 rex do workspace                       # the focused terminal's directory
@@ -137,6 +155,10 @@ rex do workspace dir=my-app            # resolved like tmux-workspaces <project>
 rex do workspace layout=dev            # like --layout dev
 rex do workspace file=stack.yaml dir=. # like --file stack.yaml .
 ```
+
+From the CLI, the app switches to the session only when Remote Control is on in
+Rex's Settings under Rex Server. Without it the session is still created, and
+`rex do` reports that Rex.app is not accepting actions.
 
 The action creates a session, names it like the tmux launcher does, and
 switches to it. An existing session with that name is reused. Projects resolve
@@ -149,16 +171,12 @@ with the same errors. Without one, the session gets `editor`, `shell`, and
 `runtime` windows. Commands are typed into each pane's shell, and panes split
 the window's first pane in order, matching the tmux layout.
 
-`setup` accepts overrides for `action`, `project_root`, `window_names`,
-`layouts_dir`, and the `zoxide` and `yq` programs to run. The Rex server may not
-inherit your shell's PATH, so give absolute paths such as
-`/opt/homebrew/bin/yq` if needed.
+`setup` accepts overrides for `action` (the action's name), `project_root`,
+`window_names`, `layouts_dir`, and the `zoxide` and `yq` programs to run.
 
-For session switching, Rex's built-in picker replaces `--session`:
-
-```lua
-rex.bind("cmd+k", "session.switch")
-```
+There is no Rex equivalent of the project picker. For switching sessions, Rex's
+built-in "Change Session…" picker replaces `--session`; bind it to a free key
+with `rex.bind("<key>", "session.switch")`.
 
 ## Tests
 
@@ -167,6 +185,11 @@ bash tests/tmux-workspaces-regression.sh
 luajit tests/rex-workspaces-test.lua
 ```
 
-Tests use real yq v4 to parse YAML and stub tmux, fzf, and zoxide to avoid changing
-live sessions or consulting your directory history. Interactive cases use a
-pseudo-terminal. They verify command behavior, not the rendered fzf appearance.
+The shell tests use real yq v4 to parse YAML and stub tmux, fzf, and zoxide to
+avoid changing live sessions or consulting your directory history. Interactive
+cases use a pseudo-terminal. They verify command behavior, not the rendered fzf
+appearance.
+
+The Rex tests need [LuaJIT](https://luajit.org) (`brew install luajit`) and yq.
+They stub the Rex API, so they create no sessions and Rex doesn't need to be
+running.
