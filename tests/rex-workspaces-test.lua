@@ -64,6 +64,24 @@ rex = {
     block = function(spec)
       return { block = spec }
     end,
+    horizontal = function(ratio, before, after)
+      return { split = { direction = "horizontal", ratio = ratio, before = before, after = after } }
+    end,
+    vertical = function(ratio, before, after)
+      return { split = { direction = "vertical", ratio = ratio, before = before, after = after } }
+    end,
+  },
+  json = {
+    -- yq converts JSON to a Lua chunk, so the tests need no JSON library.
+    decode = function(text)
+      local path = os.getenv("TMPDIR") .. "/rex-workspaces-test.json"
+      local file = assert(io.open(path, "w"))
+      file:write(text)
+      file:close()
+      local r = sh("yq -p=json -o=lua . " .. shell_quote(path))
+      os.remove(path)
+      return assert(loadstring(r.stdout))()
+    end,
   },
   action = function() end,
 }
@@ -153,6 +171,112 @@ local ok, err = pcall(ws.open, {}, { dir = tmp .. "/missing" })
 check("missing fails", ok, false)
 check("missing message", tostring(err):match("^project directory not found") ~= nil, true)
 check("missing not created", find_call("session.create"), nil)
+
+-- YAML layouts.
+local function write(path, text)
+  assert(sh("mkdir -p " .. shell_quote(path:match("^(.*)/[^/]+$"))).ok)
+  local file = assert(io.open(path, "w"))
+  file:write(text)
+  file:close()
+end
+
+local function open_error(args)
+  reset()
+  local ok, err = pcall(ws.open, {}, args)
+  check("error " .. tostring(err) .. " not created", find_call("session.create"), nil)
+  return not ok and tostring(err) or nil
+end
+
+local app = tmp .. "/Developer/stack"
+assert(sh("mkdir -p " .. shell_quote(app .. "/backend")).ok)
+write(app .. "/.tmux-workspaces/layout.yaml", [[
+windows:
+  - name: editor
+    command: nvim
+  - name: runtime
+    dir: backend
+    command: pnpm dev
+    panes:
+      - split: h
+        command: tail -f app.log
+      - split: v
+        command: pnpm test
+      - command: "  "
+]])
+
+-- The project's layout replaces the default windows.
+reset()
+ws.open({}, { dir = app })
+create = find_call("session.create")
+check("layout label", create.label, "stack")
+check("layout window count", #create.initial_windows, 2)
+local editor = create.initial_windows[1]
+check("editor label", editor.window_label, "editor")
+check("editor cwd", editor.layout.block.options.cwd, app)
+check("editor input", editor.layout.block.options.initial_input, "nvim\r")
+
+-- Each pane splits the first pane: the first split is outermost.
+local runtime = create.initial_windows[2]
+local outer = runtime.layout.split
+check("outer direction", outer.direction, "vertical")
+check("outer pane", outer.after.block.options.initial_input, "tail -f app.log\r")
+check("outer cwd", outer.after.block.options.cwd, app .. "/backend")
+local inner = outer.before.split
+check("inner direction", inner.direction, "horizontal")
+check("inner pane", inner.after.block.options.initial_input, "pnpm test\r")
+check("main pane", inner.before.block.options.initial_input, "pnpm dev\r")
+check("main label", inner.before.block.label, "runtime")
+
+-- session.name and session.dir; an explicit target overrides session.dir.
+ws.config.layouts_dir = tmp .. "/layouts"
+write(tmp .. "/layouts/dev.yml", [[
+session:
+  name: My Stack
+  dir: ]] .. app .. "\n" .. [[
+windows:
+  - name: main
+]])
+reset()
+ws.open({}, { layout = "dev.yml" })
+create = find_call("session.create")
+check("named layout label", create.label, "my-stack")
+check("session.dir", create.initial_windows[1].layout.block.options.cwd, app)
+reset()
+ws.open({}, { layout = "dev", dir = tmp .. "/cwd" })
+check("target beats session.dir", find_call("session.create").initial_windows[1].layout.block.options.cwd, tmp .. "/cwd")
+
+-- An explicit file resolves from the focused terminal's directory.
+write(tmp .. "/cwd/my.yaml", "windows:\n  - name: solo\n")
+reset()
+focused_pwd = "file://host" .. tmp .. "/cwd"
+ws.open({ block_id = "block:1" }, { file = "my.yaml" })
+check("file layout", find_call("session.create").initial_windows[1].window_label, "solo")
+
+-- Errors happen before any session is created.
+local function check_error(name, args, pattern)
+  local err = open_error(args)
+  check(name, err ~= nil and err:find(pattern, 1, true) ~= nil, true)
+  if err ~= nil and not err:find(pattern, 1, true) then
+    print("  message: " .. err)
+  end
+end
+
+local function layout_error(name, text, pattern)
+  write(tmp .. "/bad/" .. name .. ".yaml", text)
+  check_error(name, { file = tmp .. "/bad/" .. name .. ".yaml", dir = app }, pattern)
+end
+
+check_error("layout and file", { layout = "dev", file = "my.yaml" }, "cannot be combined")
+check_error("missing named layout", { layout = "nope" }, "layout 'nope' not found")
+check_error("missing file", { file = tmp .. "/nope.yaml" }, "layout file not found")
+layout_error("empty", "windows: []\n", "windows must be a nonempty list")
+layout_error("path", "windows:\n  - name: a\n    path: x\n", "rename path to dir")
+layout_error("run", "windows:\n  - name: a\n    panes:\n      - run: x\n", "rename run to command")
+layout_error("string pane", "windows:\n  - name: a\n    panes:\n      - nvim\n", "panes must be objects")
+layout_error("old split", "windows:\n  - name: a\n    panes:\n      - split: horizontal\n        command: x\n", "pane split must be h")
+layout_error("no name", "windows:\n  - command: x\n", "missing windows[0].name")
+layout_error("bad dir", "windows:\n  - name: a\n    dir: nope\n", "layout directory not found")
+layout_error("bad name", "session:\n  name: '---'\nwindows:\n  - name: a\n", "invalid session.name")
 
 cleanup()
 

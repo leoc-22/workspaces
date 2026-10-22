@@ -132,19 +132,27 @@ Run `rex config reload`, then search for "Open Workspace" in the command palette
 or run it from the CLI:
 
 ```sh
-rex do workspace              # the focused terminal's directory
-rex do workspace dir=my-app   # resolved like tmux-workspaces <project>
+rex do workspace                       # the focused terminal's directory
+rex do workspace dir=my-app            # resolved like tmux-workspaces <project>
+rex do workspace layout=dev            # like --layout dev
+rex do workspace file=stack.yaml dir=. # like --file stack.yaml .
 ```
 
-The action creates a session with `editor`, `shell`, and `runtime` windows,
-names it like the tmux launcher does, and switches to it. An existing session
-with that name is reused. Projects resolve through an explicit path, a directory
-relative to the focused terminal, an optional zoxide match, then
-`~/Developer/<name>`.
+The action creates a session, names it like the tmux launcher does, and
+switches to it. An existing session with that name is reused. Projects resolve
+through an explicit path, a directory relative to the focused terminal, an
+optional zoxide match, then `~/Developer/<name>`. Relative `file` paths also
+resolve from the focused terminal.
 
-`setup` accepts overrides for `action`, `project_root`, `window_names`, and
-`zoxide`, the zoxide program to run. The Rex server may not inherit your shell's
-PATH, so give an absolute path such as `/opt/homebrew/bin/zoxide` if needed.
+[YAML layouts](#yaml-layouts) work as they do with tmux, found the same way and
+with the same errors. Without one, the session gets `editor`, `shell`, and
+`runtime` windows. Commands are typed into each pane's shell, and panes split
+the window's first pane in order, matching the tmux layout.
+
+`setup` accepts overrides for `action`, `project_root`, `window_names`,
+`layouts_dir`, and the `zoxide` and `yq` programs to run. The Rex server may not
+inherit your shell's PATH, so give absolute paths such as
+`/opt/homebrew/bin/yq` if needed.
 
 For session switching, Rex's built-in picker replaces `--session`:
 
