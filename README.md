@@ -160,6 +160,40 @@ For session switching, Rex's built-in picker replaces `--session`:
 rex.bind("cmd+k", "session.switch")
 ```
 
+### Renaming sessions from their work
+
+The `rename_session` action ("Rename Session from Work") asks Claude Haiku to name
+the current session after what its panes show. It sends each terminal pane's
+window name, directory, program, title, and last 15 lines of screen to
+`claude -p`, so it needs the [Claude Code](https://claude.com/claude-code) CLI
+signed in. A rename takes a few seconds.
+
+```lua
+rex.bind("cmd+shift+r", "rename_session")
+```
+
+Labels look like `stack: auth-refactor`. The part before the colon is the
+workspace name, so `workspace` still finds and reuses the session. A session
+without one gets the workspace name of the repository most of its panes are in.
+
+`setup` also accepts `rename_action`, `rename_model` (default `haiku`), and
+`claude`, the CLI to run. The Rex server may not find it on its PATH, so give its
+absolute path, as in the example below.
+
+A full `init.lua` with Homebrew tools:
+
+```lua
+package.path = "/path/to/tmux-workspaces/rex/?.lua;" .. package.path
+require("tmux_workspaces").setup{
+  yq = "/opt/homebrew/bin/yq",
+  zoxide = "/opt/homebrew/bin/zoxide",
+  claude = os.getenv("HOME") .. "/.local/bin/claude",
+}
+rex.bind("cmd+shift+o", "workspace")
+rex.bind("cmd+shift+r", "rename_session")
+rex.bind("cmd+k", "session.switch")
+```
+
 ## Tests
 
 ```sh
