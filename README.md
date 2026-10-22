@@ -117,10 +117,46 @@ See [examples/layout.yaml](examples/layout.yaml) for a layout spanning projects.
 
 Removed YAML forms produce an error before session creation.
 
+## Rex
+
+`rex/tmux_workspaces.lua` brings the workspace launcher to the
+[Rex](https://www.superlogical.com/rex/docs) terminal as a custom action. Load it
+from `~/.config/rex/init.lua`, using the absolute path to this repository:
+
+```lua
+package.path = "/path/to/tmux-workspaces/rex/?.lua;" .. package.path
+require("tmux_workspaces").setup()
+```
+
+Run `rex config reload`, then search for "Open Workspace" in the command palette
+or run it from the CLI:
+
+```sh
+rex do workspace              # the focused terminal's directory
+rex do workspace dir=my-app   # resolved like tmux-workspaces <project>
+```
+
+The action creates a session with `editor`, `shell`, and `runtime` windows,
+names it like the tmux launcher does, and switches to it. An existing session
+with that name is reused. Projects resolve through an explicit path, a directory
+relative to the focused terminal, an optional zoxide match, then
+`~/Developer/<name>`.
+
+`setup` accepts overrides for `action`, `project_root`, `window_names`, and
+`zoxide`, the zoxide program to run. The Rex server may not inherit your shell's
+PATH, so give an absolute path such as `/opt/homebrew/bin/zoxide` if needed.
+
+For session switching, Rex's built-in picker replaces `--session`:
+
+```lua
+rex.bind("cmd+k", "session.switch")
+```
+
 ## Tests
 
 ```sh
 bash tests/tmux-workspaces-regression.sh
+luajit tests/rex-workspaces-test.lua
 ```
 
 Tests use real yq v4 to parse YAML and stub tmux, fzf, and zoxide to avoid changing
