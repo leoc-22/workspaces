@@ -5,14 +5,21 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd -P)"
 SCRIPT_PATH="$ROOT_DIR/scripts/tmux-workspaces"
 
+if ! command -v yq >/dev/null 2>&1 || ! [[ "$(yq --version)" == *"mikefarah/yq"*"version v4"* ]]; then
+  printf 'Mike Farah yq v4 is required for these tests\n' >&2
+  exit 1
+fi
+
 if ! command -v script >/dev/null 2>&1; then
   printf 'script(1) is required for this regression test\n' >&2
   exit 1
 fi
 
 stub_dir="$(mktemp -d)"
+stub_dir="$(cd "$stub_dir" && pwd -P)"
 marker_file="$stub_dir/fzf-called"
 fzf_input_file="$stub_dir/fzf-input"
+fzf_args_file="$stub_dir/fzf-args"
 tmux_log="$stub_dir/tmux.log"
 target_dir="$stub_dir/project"
 session_target_dir="$stub_dir/session-target"
@@ -52,6 +59,9 @@ if [[ -n "${FZF_INPUT_FILE:-}" ]]; then
 else
   cat >/dev/null
 fi
+if [[ -n "${FZF_ARGS_FILE:-}" ]]; then
+  printf '%s\n' "$*" >"$FZF_ARGS_FILE"
+fi
 if [[ -n "${FZF_SELECTION:-}" ]]; then
   printf '%s\n' "$FZF_SELECTION"
   exit 0
@@ -59,240 +69,236 @@ fi
 exit 1
 EOF
 
-cat >"$stub_dir/yq" <<'EOF'
+# Keep directory lookup independent of the user's zoxide database.
+cat >"$stub_dir/zoxide" <<'EOF'
 #!/usr/bin/env bash
-shift
-if [[ "${1:-}" == "-r" ]]; then
-  shift
-fi
-expr="$1"
-file="$2"
-name="$(basename "$file")"
-
-case "$expr" in
-  '.session.name // ""')
-    printf '\n'
-    ;;
-  '.session.dir // .session.path // ""')
-    awk -F': ' '$1 == "  dir" { print $2; exit }' "$file"
-    ;;
-  '(.windows // []) | length')
-    printf '1\n'
-    ;;
-  '.windows[0].name // ""')
-    printf 'editor\n'
-    ;;
-  '.windows[0].dir // .windows[0].path // "."')
-    printf '.\n'
-    ;;
-  '.windows[0].command // .windows[0].run // ""')
-    printf '\n'
-    ;;
-  '(.windows[0].panes // []) | length')
-    if [[ "$name" == "panes-layout.yaml" ]]; then
-      printf '2\n'
-    else
-      printf '0\n'
-    fi
-    ;;
-  '.windows[0].panes[0] | tag')
-    printf '!!map\n'
-    ;;
-  '.windows[0].panes[0].command // .windows[0].panes[0].run // ""')
-    printf 'npm ls -g\n'
-    ;;
-  '.windows[0].panes[0].split // "h"')
-    printf 'h\n'
-    ;;
-  '.windows[0].panes[1] | tag')
-    printf '!!map\n'
-    ;;
-  '.windows[0].panes[1].command // .windows[0].panes[1].run // ""')
-    printf 'nvim\n'
-    ;;
-  '.windows[0].panes[1].split // "h"')
-    printf 'v\n'
-    ;;
-  *)
-    printf '\n'
-    ;;
-esac
+exit 1
 EOF
-
-chmod +x "$stub_dir/tmux" "$stub_dir/fzf" "$stub_dir/yq"
+chmod +x "$stub_dir/tmux" "$stub_dir/fzf" "$stub_dir/zoxide"
 mkdir -p "$target_dir" "$session_target_dir"
 session_target_dir="$(cd "$session_target_dir" && pwd -P)"
 printf 'windows: []\n' >"$target_dir/only-in-target.yaml"
-printf 'session:\n  dir: %s\nwindows:\n  - name: editor\n' "$session_target_dir" >"$layout_file"
-printf 'windows:\n  - name: editor\n    panes:\n      - split: h\n        command: npm ls -g\n      - split: v\n        command: nvim\n' >"$panes_layout_file"
+printf 'session:\n  name: fixture\n  dir: %s\nwindows:\n  - name: editor\n' "$session_target_dir" >"$layout_file"
+cat >"$panes_layout_file" <<'EOF'
+windows:
+  - name: editor
+    command: 'printf "hello: world"'
+    panes:
+      - split: h
+        command: npm ls -g
+      - split: v
+        command: nvim
+      - command: 'printf "default split"'
+  - name: shell
+    command: 'printf "second window"'
+EOF
+
+run_command() {
+  env PATH="$stub_dir:$PATH" PROJ_SEARCH_DIRS="$stub_dir" \
+    FZF_MARKER_FILE="$marker_file" FZF_INPUT_FILE="$fzf_input_file" \
+    FZF_ARGS_FILE="$fzf_args_file" FZF_SELECTION="${FZF_SELECTION:-}" \
+    TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}" \
+    TMUX="${TEST_TMUX:-}" "$SCRIPT_PATH" "$@"
+}
 
 run_tty() {
-  script -q /dev/null env PATH="$stub_dir:$PATH" PROJ_SEARCH_DIRS="${PROJ_SEARCH_DIRS:-$stub_dir}" FZF_MARKER_FILE="$marker_file" FZF_INPUT_FILE="${FZF_INPUT_FILE:-}" FZF_SELECTION="${FZF_SELECTION:-}" TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}" TMUX_SESSIONS="${TMUX_SESSIONS:-api web}" TMUX="${TMUX:-}" "$SCRIPT_PATH" "$@"
+  # Only interactive cases need a pseudo-terminal. Pass the same isolated env.
+  local -a invocation=(env PATH="$stub_dir:$PATH" PROJ_SEARCH_DIRS="$stub_dir"
+    FZF_MARKER_FILE="$marker_file" FZF_INPUT_FILE="$fzf_input_file"
+    FZF_ARGS_FILE="$fzf_args_file" FZF_SELECTION="${FZF_SELECTION:-}"
+    TMUX_MARKER_FILE="$tmux_log" TMUX_HAS_SESSION_STATUS="${TMUX_HAS_SESSION_STATUS:-0}"
+    TMUX="${TEST_TMUX:-}" "$SCRIPT_PATH" "$@")
+  if [[ "$(uname -s)" == Darwin ]]; then
+    script -q /dev/null "${invocation[@]}"
+  else
+    local command
+    printf -v command '%q ' "${invocation[@]}"
+    script -q -e -c "$command" /dev/null
+  fi
 }
 
 assert_contains() {
-  local haystack="$1"
-  local needle="$2"
-
-  if [[ "$haystack" != *"$needle"* ]]; then
-    printf 'expected output to contain: %s\n' "$needle" >&2
-    return 1
-  fi
+  [[ "$1" == *"$2"* ]] || { printf 'expected output to contain: %s\nactual: %s\n' "$2" "$1" >&2; exit 1; }
 }
 
-assert_not_exists() {
-  local file_path="$1"
-
-  if [[ -e "$file_path" ]]; then
-    printf 'did not expect file to exist: %s\n' "$file_path" >&2
-    return 1
-  fi
+assert_absent() {
+  [[ "$1" != *"$2"* ]] || { printf 'unexpected output: %s\n' "$2" >&2; exit 1; }
 }
 
-assert_exists() {
-  local file_path="$1"
-
-  if [[ ! -e "$file_path" ]]; then
-    printf 'expected file to exist: %s\n' "$file_path" >&2
-    return 1
-  fi
+expect() {
+  local expected="$1"
+  shift
+  rm -f "$marker_file" "$tmux_log" "$fzf_input_file" "$fzf_args_file"
+  local status=0
+  output="$("$@" 2>&1)" || status=$?
+  [[ "$status" -eq "$expected" ]] || { printf 'expected status %s, got %s: %s\n' "$expected" "$status" "$output" >&2; exit 1; }
 }
 
-printf '1..9\n'
+count=0
+ok() {
+  count=$((count + 1))
+  printf 'ok %s - %s\n' "$count" "$1"
+}
 
-rm -f "$marker_file"
-set +e
-output_1="$(run_tty --layout --file definitely-missing.yaml 2>&1)"
-status_1=$?
-set -e
+expect 1 run_tty --file definitely-missing.yaml
+assert_contains "$output" 'layout file not found: definitely-missing.yaml'
+[[ ! -e "$marker_file" ]]
+ok 'standalone --file skips picker and reports missing file'
 
-if [[ $status_1 -ne 1 ]]; then
-  printf 'not ok 1 - --layout --file no-target should fail on missing file (got status %s)\n' "$status_1"
-  exit 1
-fi
+expect 1 run_command --layout dev --file "$layout_file"
+assert_contains "$output" 'use either --layout <name> or --file <path>'
+expect 1 run_command --layout --file "$layout_file"
+assert_contains "$output" 'missing value for --layout'
+ok 'layout name and explicit file are distinct alternatives'
 
-assert_contains "$output_1" 'layout file not found: definitely-missing.yaml'
-assert_not_exists "$marker_file"
-printf 'ok 1 - --layout --file no-target skips fzf and resolves current dir\n'
+expect 1 run_command --file only-in-target.yaml "$target_dir"
+assert_contains "$output" 'layout file not found: only-in-target.yaml'
+ok 'relative layout files resolve from the working directory'
 
-rm -f "$marker_file"
-set +e
-output_2="$(run_tty --file definitely-missing.yaml 2>&1)"
-status_2=$?
-set -e
+expect 0 run_tty
+[[ -e "$marker_file" ]]
+assert_contains "$(cat "$fzf_args_file")" '--height=40%'
+ok 'normal picker retains compact layout and cancellation succeeds'
 
-if [[ $status_2 -ne 1 ]]; then
-  printf 'not ok 2 - standalone --file should fail (got status %s)\n' "$status_2"
-  exit 1
-fi
-
-assert_contains "$output_2" 'use --layout --file for explicit layout files'
-assert_not_exists "$marker_file"
-printf 'ok 2 - standalone --file is rejected\n'
-
-rm -f "$marker_file"
-set +e
-output_3="$(run_tty --layout --file only-in-target.yaml "$target_dir" 2>&1)"
-status_3=$?
-set -e
-
-if [[ $status_3 -ne 1 ]]; then
-  printf 'not ok 3 - --layout --file should not search target directory (got status %s)\n' "$status_3"
-  exit 1
-fi
-
-assert_contains "$output_3" 'layout file not found: only-in-target.yaml'
-assert_not_exists "$marker_file"
-printf 'ok 3 - --layout --file does not search target directory\n'
-
-rm -f "$marker_file"
-set +e
-run_tty >/dev/null 2>&1
-status_4=$?
-set -e
-
-if [[ $status_4 -ne 0 ]]; then
-  printf 'not ok 4 - no-arg interactive should allow fzf cancel (got status %s)\n' "$status_4"
-  exit 1
-fi
-
-assert_exists "$marker_file"
-printf 'ok 4 - no-arg interactive still invokes fzf\n'
-
-rm -f "$marker_file" "$tmux_log"
-set +e
-TMUX_HAS_SESSION_STATUS=1 run_tty --layout --file "$layout_file" >/dev/null 2>&1
-status_5=$?
-set -e
-
-if [[ $status_5 -ne 0 ]]; then
-  printf 'not ok 5 - --layout --file should use session.dir as target (got status %s)\n' "$status_5"
-  exit 1
-fi
-
-assert_contains "$(cat "$tmux_log")" "new-session -d -s"
+TMUX_HAS_SESSION_STATUS=1 expect 0 run_tty --file "$layout_file"
+assert_contains "$(cat "$tmux_log")" 'new-session -d -s fixture'
 assert_contains "$(cat "$tmux_log")" "-c $session_target_dir"
-assert_not_exists "$marker_file"
-printf 'ok 5 - --layout --file uses session.dir as target\n'
+[[ ! -e "$marker_file" ]]
+ok 'real YAML session name and directory are used'
 
-rm -f "$marker_file" "$tmux_log"
-set +e
-TMUX_HAS_SESSION_STATUS=1 run_tty --layout --file "$panes_layout_file" "$target_dir" >/dev/null 2>&1
-status_6=$?
-set -e
+TMUX_HAS_SESSION_STATUS=1 expect 0 run_command -f "$layout_file" "$target_dir"
+assert_contains "$(cat "$tmux_log")" "-c $target_dir"
+assert_absent "$(cat "$tmux_log")" "$session_target_dir"
+ok 'explicit target overrides session.dir'
 
-if [[ $status_6 -ne 0 ]]; then
-  printf 'not ok 6 - map-form panes should parse with yq tag checks (got status %s)\n' "$status_6"
-  exit 1
-fi
+TMUX_HAS_SESSION_STATUS=1 expect 0 run_command --file="$panes_layout_file" "$target_dir"
+log="$(cat "$tmux_log")"
+assert_contains "$log" 'split-window -v'
+assert_contains "$log" 'split-window -h'
+assert_contains "$log" 'send-keys -t %1 npm ls -g C-m'
+assert_contains "$log" 'send-keys -t %1 nvim C-m'
+assert_contains "$log" 'printf "default split"'
+assert_contains "$log" 'printf "hello: world"'
+assert_contains "$log" 'new-window -t'
+assert_contains "$log" 'printf "second window"'
+ok 'real YAML creates multiple windows and both pane directions with intact commands'
 
-assert_contains "$(cat "$tmux_log")" "split-window -v"
-assert_contains "$(cat "$tmux_log")" "send-keys -t %1"
-assert_contains "$(cat "$tmux_log")" "npm ls -g"
-assert_contains "$(cat "$tmux_log")" "nvim"
-printf 'ok 6 - map-form panes parse with yq tag checks\n'
-
-rm -f "$marker_file" "$tmux_log" "$fzf_input_file"
-set +e
-FZF_INPUT_FILE="$fzf_input_file" FZF_SELECTION="[session] api" TMUX=/tmp/tmux run_tty >/dev/null 2>&1
-status_7=$?
-set -e
-
-if [[ $status_7 -ne 0 ]]; then
-  printf 'not ok 7 - no-arg interactive should switch selected tmux session (got status %s)\n' "$status_7"
-  exit 1
-fi
-
-assert_contains "$(cat "$fzf_input_file")" "[session] api"
+FZF_SELECTION='[session] api' TEST_TMUX=/tmp/test-tmux expect 0 run_tty --popup
+assert_contains "$(cat "$fzf_input_file")" $'\033[36m[session] api\033[0m'
 assert_contains "$(cat "$fzf_input_file")" "[project] $target_dir"
-assert_contains "$(cat "$tmux_log")" "switch-client -t api"
-printf 'ok 7 - no-arg interactive can fuzzy-switch existing tmux sessions\n'
+assert_contains "$(cat "$fzf_args_file")" '--ansi'
+assert_contains "$(cat "$fzf_args_file")" '--no-height --border=none --margin=0 --padding=0'
+assert_absent "$(cat "$fzf_args_file")" '--height=40%'
+assert_contains "$(cat "$tmux_log")" 'switch-client -t api'
+ok 'popup picker fills the popup and switches the selected session'
 
-rm -f "$marker_file" "$tmux_log"
-set +e
-TMUX=/tmp/tmux run_tty --session web >/dev/null 2>&1
-status_8=$?
-set -e
+FZF_SELECTION=web TEST_TMUX=/tmp/test-tmux expect 0 run_tty --popup --session
+assert_contains "$(cat "$fzf_args_file")" '--no-height'
+assert_absent "$(cat "$fzf_input_file")" '[project]'
+assert_contains "$(cat "$tmux_log")" 'switch-client -t web'
+ok 'session-only picker also supports popup mode'
 
-if [[ $status_8 -ne 0 ]]; then
-  printf 'not ok 8 - --session name should switch directly (got status %s)\n' "$status_8"
-  exit 1
-fi
+TEST_TMUX=/tmp/test-tmux expect 0 run_command -s web
+assert_contains "$(cat "$tmux_log")" 'switch-client -t web'
+[[ ! -e "$marker_file" ]]
+expect 0 run_command --session=web
+assert_contains "$(cat "$tmux_log")" 'attach-session -t web'
+ok 'direct session selection switches inside tmux and attaches outside'
 
-assert_not_exists "$marker_file"
-assert_contains "$(cat "$tmux_log")" "switch-client -t web"
-printf 'ok 8 - --session switches directly without fzf\n'
+TMUX_HAS_SESSION_STATUS=1 expect 1 run_command --session missing
+assert_contains "$output" 'tmux session not found: missing'
+expect 1 run_command --session --file "$layout_file"
+assert_contains "$output" '--session cannot be combined'
+ok 'missing sessions and conflicting modes fail clearly'
 
-rm -f "$marker_file" "$tmux_log"
-set +e
-TMUX_HAS_SESSION_STATUS=1 run_tty --session missing >/dev/null 2>&1
-status_9=$?
-set -e
+expect 1 run_command "$target_dir" "$session_target_dir"
+assert_contains "$output" 'only one target is supported'
+expect 1 run_command -- "$target_dir" "$session_target_dir"
+assert_contains "$output" 'only one target is supported'
+ok 'second positional target is rejected with and without --'
 
-if [[ $status_9 -ne 1 ]]; then
-  printf 'not ok 9 - --session should fail for missing sessions (got status %s)\n' "$status_9"
-  exit 1
-fi
+literal_dir="$stub_dir/project :: with spaces "
+mkdir -p "$literal_dir"
+TMUX_HAS_SESSION_STATUS=1 expect 0 run_command -- "$literal_dir"
+assert_contains "$(cat "$tmux_log")" "-c $literal_dir"
+ok 'literal paths preserve spaces and accept ::'
 
-assert_not_exists "$marker_file"
-printf 'ok 9 - --session fails for missing sessions\n'
+FZF_SELECTION="[project] $target_dir" TMUX_HAS_SESSION_STATUS=1 expect 0 run_tty --popup
+assert_contains "$(cat "$tmux_log")" "-c $target_dir"
+assert_contains "$(cat "$tmux_log")" '-n ai'
+assert_contains "$(cat "$tmux_log")" '-n editor'
+assert_contains "$(cat "$tmux_log")" '-n shell'
+ok 'picker-selected projects create the default workspace'
+
+(
+  cd "$target_dir"
+  TMUX_HAS_SESSION_STATUS=1 expect 0 run_command
+  assert_contains "$(cat "$tmux_log")" "-c $target_dir"
+  [[ ! -e "$marker_file" ]]
+)
+ok 'noninteractive no-target mode uses the current directory'
+
+for option in --layout -l --file -f; do
+  expect 1 run_command "$option"
+  assert_contains "$output" 'missing value'
+done
+expect 1 run_command ''
+assert_contains "$output" 'target cannot be empty'
+expect 1 run_command --session
+assert_contains "$output" 'requires a session name'
+expect 0 run_tty --popup --session
+[[ ! -e "$tmux_log" ]]
+ok 'missing arguments fail clearly and session picker cancellation succeeds'
+
+mkdir -p "$target_dir/.tmux-workspaces"
+printf 'session:\n  name: "null"\nwindows:\n  - name: editor\n' >"$target_dir/.tmux-workspaces/layout.yml"
+TMUX_HAS_SESSION_STATUS=1 expect 0 run_command "$target_dir"
+assert_contains "$(cat "$tmux_log")" 'new-session -d -s null'
+ok 'project-local .yml discovery preserves literal null session name'
+
+cp "$layout_file" "$stub_dir/null"
+(cd "$stub_dir"; expect 0 run_command --file null)
+# Exercise named lookup against fixture layouts, without reading user layouts.
+mkdir -p "$stub_dir/layouts"
+cp "$layout_file" "$stub_dir/layouts/null.yaml"
+cp "$panes_layout_file" "$stub_dir/layouts/null.yml"
+(
+  sed '/^parse_args "\$@"/,$d' "$SCRIPT_PATH" >"$stub_dir/functions.sh"
+  source "$stub_dir/functions.sh"
+  GLOBAL_YAML_LAYOUTS_DIR="$stub_dir/layouts"
+  parse_args --layout=null
+  [[ "$(resolve_yaml_layout_file "$target_dir")" == "$stub_dir/layouts/null.yaml" ]]
+  rm "$stub_dir/layouts/null.yaml"
+  [[ "$(resolve_yaml_layout_file "$target_dir")" == "$stub_dir/layouts/null.yml" ]]
+)
+ok 'literal null names work and named layouts prefer .yaml then .yml'
+
+invalid_file="$stub_dir/invalid.yaml"
+for legacy in \
+  'session: {path: /tmp}' \
+  'windows: [{name: editor, path: /tmp}]' \
+  'windows: [{name: editor, run: echo hi}]' \
+  'windows: [{name: editor, panes: [{run: echo hi}]}]' \
+  'windows: [{name: editor, panes: [echo hi]}]' \
+  'windows: [{name: editor, panes: [{split: horizontal, command: echo hi}]}]' \
+  'windows: [{name: editor, panes: [{split: "h:echo wrong", command: echo right}]}]'; do
+  if [[ "$legacy" == session:* ]]; then
+    printf 'windows: [{name: editor}]\n%s\n' "$legacy" >"$invalid_file"
+  else
+    printf '%s\n' "$legacy" >"$invalid_file"
+  fi
+  TMUX_HAS_SESSION_STATUS=1 expect 1 run_command --file "$invalid_file" "$target_dir"
+  assert_contains "$output" 'invalid layout'
+  [[ ! -e "$tmux_log" ]]
+done
+ok 'removed YAML aliases and pane formats fail before session creation'
+
+printf 'windows: []\n' >"$invalid_file"
+expect 1 run_command --file "$invalid_file"
+assert_contains "$output" 'windows must be a nonempty list'
+printf 'windows: [\n' >"$invalid_file"
+expect 1 run_command --file "$invalid_file"
+assert_contains "$output" 'invalid YAML layout'
+ok 'empty and malformed YAML fail with real parser'
+
+printf '1..%s\n' "$count"

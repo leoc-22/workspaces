@@ -3,13 +3,13 @@ session:
 windows:
   - name: cow
     dir: ~/Developer/cow
-    command: z cow && pnpm dev
+    command: pnpm dev
   - name: cob
     dir: ~/Developer/cob
-    command: z cob && pnpm dev
+    command: pnpm dev
   - name: cos
     dir: ~/Developer/cos
-    command: z cos && ./gradlew bootRun
+    command: ./gradlew bootRun
     panes:
       - split: h
-        command: mysql -P 3301 --protocol=tcp -u root -ppaymenow
+        command: mysql -P 3301 --protocol=tcp -u root -p
