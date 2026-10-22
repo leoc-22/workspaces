@@ -138,17 +138,28 @@ you already have one, append the example instead by changing `>` to `>>`. The
 result looks like this:
 
 ```lua
+-- Example ~/.config/rex/init.lua. The README's install command fills in
+-- this repository's path below.
 package.path = "/Users/you/Developer/tmux-workspaces/rex/?.lua;" .. package.path
 require("tmux_workspaces").setup{
   yq = "/opt/homebrew/bin/yq",
   zoxide = "/opt/homebrew/bin/zoxide",
+  -- shell = "/opt/homebrew/bin/fish", -- leave unset to use your login shell
 }
 rex.bind("cmd+shift+o", "workspace")
 ```
 
-The Rex server may not inherit your shell's PATH, so give absolute paths to yq
-and zoxide; the ones above are Homebrew's on Apple silicon. Bind any key Rex
-doesn't already use. Then load the file and confirm the action is there:
+Then edit `~/.config/rex/init.lua` to fit your setup:
+
+- **yq and zoxide:** the Rex server may not inherit your shell's PATH, so these
+  are absolute paths. The ones above are Homebrew's on Apple silicon; check
+  yours with `command -v yq zoxide`.
+- **shell:** new panes run your account's login shell. If your other Rex panes
+  run a different shell, such as Fish, uncomment this line and set it to that
+  shell's path, from `command -v fish`.
+- **Key:** bind any key Rex doesn't already use.
+
+Then load the file and confirm the action is there:
 
 ```sh
 rex config check    # exists: yes, actions: 1
@@ -182,14 +193,8 @@ with the same errors. Without one, the session gets `ai`, `editor`, and
 the window's first pane in order, matching the tmux layout.
 
 `setup` accepts overrides for `action` (the action's name), `project_root`,
-`window_names`, `layouts_dir`, and the `zoxide` and `yq` programs to run.
-
-The panes run your account's login shell unless you set `shell`. If Rex runs a
-different shell in your other panes, such as Fish, set it to match:
-
-```lua
-require("tmux_workspaces").setup{ shell = "/opt/homebrew/bin/fish" }
-```
+`window_names`, `layouts_dir`, `shell` (the panes' shell), and the `zoxide` and
+`yq` programs to run.
 
 There is no Rex equivalent of the project picker. For switching sessions, Rex's
 built-in "Change Session…" picker replaces `--session`; bind it to a free key
