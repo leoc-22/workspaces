@@ -2,10 +2,8 @@
 -- ai, editor, and shell windows, or with a YAML layout, reusing the
 -- session when it exists.
 --
--- Load it from ~/.config/rex/init.lua:
---
---   package.path = "/path/to/tmux-workspaces/rex/?.lua;" .. package.path
---   require("tmux_workspaces").setup()
+-- Load it from ~/.config/rex/init.lua; rex/init.example.lua is a starting
+-- point, and the README's Rex section has the command that installs it.
 
 local M = {}
 

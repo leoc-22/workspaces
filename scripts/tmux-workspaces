@@ -41,7 +41,7 @@ Notes:
   - No args (non-interactive): uses current dir.
   - --session only switches to active tmux sessions; it does not create projects.
   - With --layout or --file and no target: uses session.dir from YAML when present, otherwise current dir.
-  - Single target: YAML layout or default windows.
+  - Single target: YAML layout, otherwise ai, editor, and shell windows.
 EOF
 }
 

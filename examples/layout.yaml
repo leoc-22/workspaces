@@ -1,3 +1,6 @@
+# A layout spanning several projects. Open it with either launcher:
+#   tmux-workspaces --file examples/layout.yaml
+#   rex do workspace file=examples/layout.yaml
 session:
   name: cow-stack
 windows:
