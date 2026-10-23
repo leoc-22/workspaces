@@ -141,6 +141,13 @@ require("workspaces").setup{
   -- shell = "/opt/homebrew/bin/fish", -- leave unset to use your login shell
 }
 rex.bind("cmd+shift+o", "workspace")
+
+-- Save and restore every session, like tmux-resurrect.
+require("resurrect").setup{
+  -- shell = "/opt/homebrew/bin/fish", -- leave unset to use your login shell
+}
+rex.bind("cmd+alt+s", "resurrect_save")
+rex.bind("cmd+alt+r", "resurrect_restore")
 ```
 
 Then edit `~/.config/rex/init.lua` to fit your setup:
@@ -156,7 +163,7 @@ Then edit `~/.config/rex/init.lua` to fit your setup:
 Then load the file and confirm the action is there:
 
 ```sh
-rex config check    # exists: yes, actions: 1
+rex config check    # exists: yes, actions: 3
 rex config reload
 ```
 
@@ -194,11 +201,43 @@ There is no Rex equivalent of the project picker. For switching sessions, Rex's
 built-in "Change Session…" picker replaces `--session`; bind it to a free key
 with `rex.bind("<key>", "session.switch")`.
 
+## Saving and restoring sessions
+
+`rex/resurrect.lua` saves every Rex session to a file and brings them back
+later, like [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect).
+The [example configuration](rex/init.example.lua) loads it and binds
+Cmd+Alt+S to save and Cmd+Alt+R to restore. It adds two actions:
+
+```sh
+rex do resurrect_save                      # save every session
+rex do resurrect_restore                   # restore the last save
+rex do resurrect_restore file=/path/to.json
+```
+
+A save records each session's label, its windows in order and which was
+active, the splits and their ratios, block labels, and each terminal's
+directory. Directories come from the shell's reported working directory, or
+from the foreground program when the shell reports none.
+
+A terminal running `vi`, `vim`, `nvim`, `emacs`, `man`, `less`, `more`,
+`tail`, `top`, or `htop` gets that command typed back in on restore, with its
+arguments. Every other terminal comes back as a shell in the same directory.
+Screen contents, scrollback, and floating layers aren't saved.
+
+Saves go to `~/.local/share/rex/resurrect/` (under `$XDG_DATA_HOME` when set),
+one timestamped file per save plus `last.json`, which restore reads by
+default. Old saves are never deleted. Restore skips any session whose label is
+already open, so it is safe to run more than once.
+
+`setup` accepts overrides for `save_action`, `restore_action`, `dir`, `shell`
+(the restored panes' shell), and `restore_programs`.
+
 ## Tests
 
 ```sh
 bash tests/workspaces-regression.sh
 luajit tests/rex-workspaces-test.lua
+luajit tests/rex-resurrect-test.lua
 ```
 
 The shell tests need yq v4 and `script(1)`, which macOS includes. They use real

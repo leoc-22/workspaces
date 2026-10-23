@@ -1,0 +1,281 @@
+-- Tests for rex/resurrect.lua. Run with: luajit tests/rex-resurrect-test.lua
+--
+-- The rex global is stubbed: rex.exec runs real commands, a fake server holds
+-- the sessions, and snapshots are written under TMPDIR.
+
+local root = arg[0]:match("^(.*)/tests/[^/]+$") or "."
+package.path = root .. "/rex/?.lua;" .. package.path
+
+local function shell_quote(value)
+  return "'" .. value:gsub("'", "'\\''") .. "'"
+end
+
+local function sh(command)
+  local pipe = io.popen(command .. " 2>/dev/null; echo \"exit:$?\"")
+  local out = pipe:read("*a")
+  pipe:close()
+  local stdout, code = out:match("^(.*)exit:(%d+)\n$")
+  return { stdout = stdout, ok = code == "0", code = tonumber(code) }
+end
+
+local function encode(value)
+  local kind = type(value)
+  if kind == "string" then
+    return '"' .. value:gsub('[%c"\\]', function(c)
+      return ("\\u%04x"):format(c:byte())
+    end) .. '"'
+  elseif kind == "number" or kind == "boolean" then
+    return tostring(value)
+  end
+  local parts = {}
+  if #value > 0 then
+    for _, item in ipairs(value) do
+      table.insert(parts, encode(item))
+    end
+    return "[" .. table.concat(parts, ",") .. "]"
+  end
+  for key, item in pairs(value) do
+    table.insert(parts, encode(tostring(key)) .. ":" .. encode(item))
+  end
+  return "{" .. table.concat(parts, ",") .. "}"
+end
+
+local calls, sessions, views, terminals
+local function reset()
+  calls, sessions, views, terminals = {}, {}, {}, {}
+end
+
+local function record(method, args)
+  table.insert(calls, { method = method, args = args })
+end
+
+rex = {
+  exec = function(argv)
+    local quoted = {}
+    for i, word in ipairs(argv) do
+      quoted[i] = shell_quote(word)
+    end
+    return sh(table.concat(quoted, " "))
+  end,
+  call = function(method, args)
+    record(method, args)
+    if method == "session.list" then
+      return { sessions = sessions }
+    end
+    local windows = {}
+    for i in ipairs(args.initial_windows) do
+      windows[i] = { window_id = "window:" .. i }
+    end
+    return { session_id = "session:new", initial_windows = windows }
+  end,
+  session = setmetatable({
+    view = function(args)
+      return views[args.session_id]
+    end,
+  }, {
+    __index = function(_, method)
+      return function(args)
+        record("session." .. method, args)
+        return {}
+      end
+    end,
+  }),
+  block = {
+    call = function(creator, method, args)
+      local terminal = terminals[args.block_id]
+      if creator ~= "com.superlogical.terminal" or terminal == nil then
+        return nil, "no such block"
+      end
+      if method == "pwd" then
+        return { pwd = terminal.pwd }
+      end
+      return { foreground = terminal.foreground }
+    end,
+  },
+  layout = {
+    block = function(spec)
+      return { block = spec }
+    end,
+    horizontal = function(ratio, before, after)
+      return { split = { direction = "horizontal", ratio = ratio, before = before, after = after } }
+    end,
+    vertical = function(ratio, before, after)
+      return { split = { direction = "vertical", ratio = ratio, before = before, after = after } }
+    end,
+  },
+  json = {
+    encode = function(value)
+      return encode(value)
+    end,
+    -- yq converts JSON to a Lua chunk, so the tests need no JSON library.
+    decode = function(text)
+      local path = os.getenv("TMPDIR") .. "/rex-resurrect-test.json"
+      local file = assert(io.open(path, "w"))
+      file:write(text)
+      file:close()
+      local r = sh("yq -p=json -o=lua . " .. shell_quote(path))
+      os.remove(path)
+      return assert(loadstring(r.stdout))()
+    end,
+  },
+  action = function() end,
+}
+
+local resurrect = require("resurrect")
+
+local failures = 0
+local function check(name, got, want)
+  if got ~= want then
+    failures = failures + 1
+    print(("FAIL %s: got %s, want %s"):format(name, tostring(got), tostring(want)))
+  end
+end
+
+local function find_calls(method)
+  local found = {}
+  for _, call in ipairs(calls) do
+    if call.method == method then
+      table.insert(found, call.args)
+    end
+  end
+  return found
+end
+
+-- Fixture directory. Cleanup only ever removes a path ending in this marker.
+local MARKER = "rex-resurrect-test-" .. os.time()
+local tmp_base = assert(os.getenv("TMPDIR"), "TMPDIR must be set")
+local tmp = sh("mkdir " .. shell_quote(tmp_base .. "/" .. MARKER) .. " && cd " ..
+  shell_quote(tmp_base .. "/" .. MARKER) .. " && pwd -P")
+assert(tmp.ok, "could not create fixture directory under TMPDIR")
+tmp = tmp.stdout:gsub("%s+$", "")
+assert(tmp:sub(-#MARKER) == MARKER, "unexpected fixture path: " .. tmp)
+
+resurrect.setup{ dir = tmp .. "/snapshots" }
+
+check("command shell", resurrect.foreground_command({ foreground = { name = "fish" } }), nil)
+check("command name", resurrect.foreground_command({ foreground = { name = "/usr/bin/htop" } }), "htop")
+check("command argv", resurrect.foreground_command({
+  foreground = { name = "nvim", argv = { "/opt/bin/nvim", "a b.txt", "it's", "-c", "set nu" } },
+}), [[nvim 'a b.txt' 'it'"'"'s' -c 'set nu']])
+check("command none", resurrect.foreground_command(nil), nil)
+
+-- Two sessions: "api" has an editor window and a window split three ways;
+-- "notes" has one window. Block b5 isn't a terminal.
+reset()
+sessions = {
+  { session_id = "session:api", label = "api" },
+  { session_id = "session:notes", label = "notes" },
+  { session_id = "session:empty", label = "empty" },
+}
+views["session:api"] = {
+  label = "api",
+  active_window_id = "window:run",
+  windows = {
+    { window_id = "window:edit", label = "editor", layout = { block = { block_id = "b1", label = "editor" } } },
+    {
+      window_id = "window:run",
+      label = "runtime",
+      layout = { split = {
+        direction = "vertical", ratio = 0.7,
+        before = { split = {
+          direction = "horizontal", ratio = 0.4,
+          before = { block = { block_id = "b2" } },
+          after = { block = { block_id = "b3" } },
+        } },
+        after = { block = { block_id = "b4" } },
+      } },
+    },
+  },
+  blocks = { b2 = { block_id = "b2", label = "server" } },
+}
+views["session:notes"] = {
+  windows = { { window_id = "window:n", label = "notes", layout = { block = { block_id = "b5" } } } },
+}
+views["session:empty"] = { windows = {} }
+terminals = {
+  b1 = { pwd = "file://host/src/my%20api", foreground = { name = "nvim", argv = { "nvim", "main.go" } } },
+  b2 = { pwd = "file://host/src/my%20api/backend", foreground = { name = "fish" } },
+  b3 = { foreground = { name = "tail", cwd = "/var/log", argv = { "tail", "-f", "app.log" } } },
+  b4 = { pwd = "/src/my api", foreground = { name = "pnpm", argv = { "pnpm", "dev" } } },
+}
+
+local saved = resurrect.save()
+check("saved sessions", saved.sessions, 2)
+check("saved file", saved.file:match("/rex_resurrect_%d+T%d+%.json$") ~= nil, true)
+check("last written", io.open(tmp .. "/snapshots/last.json") ~= nil, true)
+
+local snapshot = resurrect.load_snapshot(saved.file)
+local api = snapshot.sessions[1]
+check("api label", api.label, "api")
+check("api active", api.active_window, 2)
+check("editor label", api.windows[1].label, "editor")
+check("editor block label", api.windows[1].layout.label, "editor")
+check("editor cwd", api.windows[1].layout.cwd, "/src/my api")
+check("editor command", api.windows[1].layout.command, "nvim main.go")
+local run = api.windows[2].layout
+check("outer split", run.split, "vertical")
+check("outer ratio", run.ratio, 0.7)
+check("inner split", run.before.split, "horizontal")
+check("server label", run.before.before.label, "server")
+check("server cwd", run.before.before.cwd, "/src/my api/backend")
+check("shell command", run.before.before.command, nil)
+check("fallback cwd", run.before.after.cwd, "/var/log")
+check("tail command", run.before.after.command, "tail -f app.log")
+check("unknown program", run.after.command, nil)
+check("non-terminal", snapshot.sessions[2].windows[1].layout.cwd, nil)
+check("notes label", snapshot.sessions[2].label, "notes")
+
+-- Restoring skips sessions that are still open and rebuilds the rest.
+reset()
+sessions = { { session_id = "session:notes", label = "notes" } }
+local result = resurrect.restore()
+check("restored", result.restored[1], "api")
+check("restored count", #result.restored, 1)
+check("skipped", result.skipped[1], "notes")
+local creates = find_calls("session.create")
+check("create count", #creates, 1)
+local create = creates[1]
+check("create label", create.label, "api")
+check("window count", #create.initial_windows, 2)
+local editor = create.initial_windows[1]
+check("window label", editor.window_label, "editor")
+check("restored cwd", editor.layout.block.options.cwd, "/src/my api")
+check("restored command", editor.layout.block.options.initial_input, "nvim main.go\r")
+check("restored block label", editor.layout.block.label, "editor")
+local outer = create.initial_windows[2].layout.split
+check("restored outer", outer.direction, "vertical")
+check("restored ratio", outer.ratio, 0.7)
+check("restored inner", outer.before.split.direction, "horizontal")
+check("restored shell", outer.before.split.before.block.options.initial_input, nil)
+check("focused active", find_calls("session.focus_window")[1].window_id, "window:2")
+
+-- The shell option applies to every restored pane.
+resurrect.config.shell = "/opt/homebrew/bin/fish"
+reset()
+resurrect.restore(saved.file)
+check("shell option", find_calls("session.create")[2].initial_windows[1].layout.block.options.shell,
+  "/opt/homebrew/bin/fish")
+resurrect.config.shell = nil
+
+-- Errors.
+local function check_error(name, fn, pattern)
+  reset()
+  local ok, err = pcall(fn)
+  check(name, not ok and tostring(err):find(pattern, 1, true) ~= nil, true)
+  check(name .. " not created", #find_calls("session.create"), 0)
+end
+check_error("missing snapshot", function() resurrect.restore(tmp .. "/nope.json") end, "no saved sessions")
+local bad = assert(io.open(tmp .. "/bad.json", "w"))
+bad:write('{"sessions": []}')
+bad:close()
+check_error("not a snapshot", function() resurrect.restore(tmp .. "/bad.json") end, "not a resurrect snapshot")
+
+if tmp:sub(-#MARKER) == MARKER then
+  sh("rm -rf " .. shell_quote(tmp))
+end
+
+if failures > 0 then
+  print(failures .. " failure(s)")
+  os.exit(1)
+end
+print("ok")
