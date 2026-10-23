@@ -215,13 +215,14 @@ rex do resurrect_restore file=/path/to.json
 ```
 
 A save records each session's label, its windows in order and which was
-active, the splits and their ratios, block labels, and each terminal's
-directory. Directories come from the shell's reported working directory, or
+active, the splits and their ratios, the window and block labels you set, and
+each terminal's directory. Labels Rex generated, such as `Window 1a2b3c4d`,
+aren't saved, so restored windows and blocks get fresh ones. Directories come from the shell's reported working directory, or
 from the foreground program when the shell reports none.
 
 A terminal running `vi`, `vim`, `nvim`, `emacs`, `man`, `less`, `more`,
-`tail`, `top`, or `htop` gets that command typed back in on restore, with its
-arguments. Every other terminal comes back as a shell in the same directory.
+`tail`, `top`, or `htop` gets that command typed back in and run on restore,
+with its arguments as `ps` reports them, which drops their quoting. Every other terminal comes back as a shell in the same directory.
 Screen contents, scrollback, and floating layers aren't saved.
 
 Saves go to `~/.local/share/rex/resurrect/` (under `$XDG_DATA_HOME` when set),

@@ -10,7 +10,6 @@
 local M = {}
 
 local SHELL = "com.superlogical.terminal.shell"
-local TERMINAL = "com.superlogical.terminal"
 local HOME = os.getenv("HOME") or ""
 local DATA_HOME = os.getenv("XDG_DATA_HOME") or (HOME .. "/.local/share")
 local VERSION = 1
@@ -35,8 +34,9 @@ local function basename(path)
   return path:match("([^/]+)/*$") or path
 end
 
+-- Terminal methods go through block.method, which takes the session and block.
 local function call_block(session_id, block_id, method)
-  local r = rex.block.call(TERMINAL, method, { session_id = session_id, block_id = block_id })
+  local r = rex.call("block.method", { session_id = session_id, block_id = block_id, method = method, args = {} })
   if type(r) ~= "table" then
     return nil
   end
@@ -51,45 +51,83 @@ local function block_pwd(session_id, block_id)
   return url_decode(r.pwd:match("^file://[^/]*(/.*)$") or r.pwd)
 end
 
--- Quotes a word only when the shell could read it differently. This quoting
--- reads the same in sh, bash, zsh, and fish.
-local function shell_word(word)
-  if word:match("^[%w%._/:=@%%+,-]+$") then
-    return word
+-- Every name the process goes by: its executable's, and the file names of
+-- the path and argv0 it was started by.
+local function process_names(fg)
+  local names = {}
+  for _, key in ipairs({ "name", "invoked_path", "argv0" }) do
+    local value = fg[key]
+    if type(value) == "string" and value ~= "" then
+      names[basename(value)] = true
+    end
   end
-  return "'" .. word:gsub("'", [['"'"']]) .. "'"
+  return names
+end
+
+-- The process method reports no arguments, so the command line comes from ps,
+-- which drops their quoting.
+local function command_line(pid)
+  if pid == nil then
+    return nil
+  end
+  local r = rex.exec({ "ps", "-ww", "-o", "args=", "-p", tostring(pid) })
+  if r == nil or not r.ok then
+    return nil
+  end
+  local line = r.stdout:gsub("^%s+", ""):gsub("%s+$", "")
+  if line == "" or line:find("%c") then
+    return nil
+  end
+  return line
 end
 
 -- Returns the command line to type back in, or nil when the foreground program
--- is the shell or isn't in restore_programs.
+-- is the block's own shell or isn't in restore_programs. The block's shell is
+-- the outermost process other than login, so a foreground process with any
+-- other ancestor is a program the shell runs.
 function M.foreground_command(process)
   local fg = type(process) == "table" and process.foreground
   if type(fg) ~= "table" or type(fg.name) ~= "string" then
     return nil
   end
-  local name = basename(fg.name)
-  local allowed = false
-  for _, program in ipairs(M.config.restore_programs) do
-    if program == name then
-      allowed = true
+  local is_program = false
+  for _, ancestor in ipairs(type(process.ancestors) == "table" and process.ancestors or {}) do
+    if ancestor.name ~= "login" then
+      is_program = true
     end
   end
-  if not allowed then
+  if not is_program then
     return nil
   end
-  if type(fg.argv) == "table" and #fg.argv > 0 then
-    local words = { name }
-    for i = 2, #fg.argv do
-      table.insert(words, shell_word(tostring(fg.argv[i])))
+  local names = process_names(fg)
+  for _, program in ipairs(M.config.restore_programs) do
+    if names[program] then
+      return command_line(fg.pid) or program
     end
-    return table.concat(words, " ")
   end
-  return name
+  return nil
 end
 
--- session.view's layout nodes have the shape rex.layout builds:
--- { block = { block_id, label } } or
--- { split = { direction, ratio, before, after } }.
+-- Rex's generated labels are left out, so restore gets fresh ones rather
+-- than stale copies such as "Window 1a2b3c4d".
+local HEX8 = string.rep("%x", 8)
+
+local function user_window_label(label)
+  if type(label) ~= "string" or label:match("^Window " .. HEX8 .. "$") then
+    return nil
+  end
+  return label
+end
+
+local function user_block_label(label)
+  if type(label) ~= "string" or label == "shell" or label:match("^Block " .. HEX8 .. "$") then
+    return nil
+  end
+  return label
+end
+
+-- Layout nodes are { block_id } leaves or { split = { direction, ratio,
+-- before, after } }. Blocks maps each block_id to its entry in the layer.
 local function save_node(session_id, node, blocks)
   if type(node) ~= "table" then
     return nil
@@ -103,33 +141,34 @@ local function save_node(session_id, node, blocks)
     end
     return { split = split.direction, ratio = split.ratio or 0.5, before = before, after = after }
   end
-  local block = type(node.block) == "table" and node.block or node
-  local id = block.block_id
+  local id = node.block_id
   if id == nil then
     return nil
   end
-  local info = blocks[id] or {}
+  local block = blocks[id] or {}
+  if block.flavor ~= nil and block.flavor ~= SHELL then
+    return { label = user_block_label(block.label) }
+  end
   local process = call_block(session_id, id, "process")
   local cwd = block_pwd(session_id, id)
   if cwd == nil and process ~= nil and type(process.foreground) == "table" then
     cwd = process.foreground.cwd
   end
   return {
-    label = block.label or info.label,
+    label = user_block_label(block.label),
     cwd = cwd,
     command = M.foreground_command(process),
   }
 end
 
--- view.blocks may be a list of blocks or a map from block_id to block.
-local function index_blocks(view)
-  local blocks = {}
-  for key, block in pairs(type(view.blocks) == "table" and view.blocks or {}) do
-    if type(block) == "table" then
-      blocks[block.block_id or key] = block
+-- A window's layout is its tiled layer's; floating layers aren't saved.
+local function tiled_layer(window)
+  for _, layer in ipairs(type(window.layers) == "table" and window.layers or {}) do
+    if layer.kind == "tiled" then
+      return layer
     end
   end
-  return blocks
+  return nil
 end
 
 function M.save_session(session)
@@ -137,12 +176,16 @@ function M.save_session(session)
   if view == nil then
     error(err, 0)
   end
-  local blocks = index_blocks(view)
   local saved = { label = session.label or view.label, windows = {} }
   for _, window in ipairs(view.windows or {}) do
-    local layout = save_node(session.session_id, window.layout, blocks)
+    local layer = tiled_layer(window)
+    local blocks = {}
+    for _, block in ipairs(layer and layer.blocks or {}) do
+      blocks[block.block_id] = block
+    end
+    local layout = layer and save_node(session.session_id, layer.layout, blocks)
     if layout ~= nil then
-      table.insert(saved.windows, { label = window.label, layout = layout })
+      table.insert(saved.windows, { label = user_window_label(window.label), layout = layout })
       if window.window_id ~= nil and window.window_id == view.active_window_id then
         saved.active_window = #saved.windows
       end

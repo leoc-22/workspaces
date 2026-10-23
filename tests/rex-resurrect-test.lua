@@ -40,9 +40,9 @@ local function encode(value)
   return "{" .. table.concat(parts, ",") .. "}"
 end
 
-local calls, sessions, views, terminals
+local calls, sessions, views, terminals, commands
 local function reset()
-  calls, sessions, views, terminals = {}, {}, {}, {}
+  calls, sessions, views, terminals, commands = {}, {}, {}, {}, {}
 end
 
 local function record(method, args)
@@ -51,6 +51,11 @@ end
 
 rex = {
   exec = function(argv)
+    -- ps reports the command lines of the fake terminals' programs.
+    if argv[1] == "ps" then
+      local line = commands[tonumber(argv[#argv])]
+      return { stdout = line and (line .. "\n") or "", ok = line ~= nil }
+    end
     local quoted = {}
     for i, word in ipairs(argv) do
       quoted[i] = shell_quote(word)
@@ -61,6 +66,16 @@ rex = {
     record(method, args)
     if method == "session.list" then
       return { sessions = sessions }
+    end
+    if method == "block.method" then
+      local terminal = terminals[args.block_id]
+      if terminal == nil then
+        return nil, "no such block"
+      end
+      if args.method == "pwd" then
+        return { pwd = terminal.pwd }
+      end
+      return { foreground = terminal.foreground, ancestors = terminal.ancestors, home = "/home/you" }
     end
     local windows = {}
     for i in ipairs(args.initial_windows) do
@@ -80,18 +95,6 @@ rex = {
       end
     end,
   }),
-  block = {
-    call = function(creator, method, args)
-      local terminal = terminals[args.block_id]
-      if creator ~= "com.superlogical.terminal" or terminal == nil then
-        return nil, "no such block"
-      end
-      if method == "pwd" then
-        return { pwd = terminal.pwd }
-      end
-      return { foreground = terminal.foreground }
-    end,
-  },
   layout = {
     block = function(spec)
       return { block = spec }
@@ -152,11 +155,18 @@ assert(tmp:sub(-#MARKER) == MARKER, "unexpected fixture path: " .. tmp)
 
 resurrect.setup{ dir = tmp .. "/snapshots" }
 
-check("command shell", resurrect.foreground_command({ foreground = { name = "fish" } }), nil)
-check("command name", resurrect.foreground_command({ foreground = { name = "/usr/bin/htop" } }), "htop")
-check("command argv", resurrect.foreground_command({
-  foreground = { name = "nvim", argv = { "/opt/bin/nvim", "a b.txt", "it's", "-c", "set nu" } },
-}), [[nvim 'a b.txt' 'it'"'"'s' -c 'set nu']])
+reset()
+local login = { { name = "login" } }
+local in_shell = { { name = "zsh" }, { name = "login" } }
+commands[42] = "/opt/bin/nvim a b.txt"
+check("command idle shell", resurrect.foreground_command({ foreground = { name = "zsh" }, ancestors = login }), nil)
+check("command nested shell", resurrect.foreground_command({ foreground = { name = "bash" }, ancestors = in_shell }), nil)
+check("command ps", resurrect.foreground_command({ foreground = { name = "nvim", pid = 42 }, ancestors = in_shell }),
+  "/opt/bin/nvim a b.txt")
+check("command name", resurrect.foreground_command({ foreground = { name = "htop", pid = 7 }, ancestors = in_shell }), "htop")
+check("command argv0", resurrect.foreground_command({
+  foreground = { name = "nvim-0.10", argv0 = "vim", pid = 7 }, ancestors = in_shell,
+}), "vim")
 check("command none", resurrect.foreground_command(nil), nil)
 
 -- Two sessions: "api" has an editor window and a window split three ways;
@@ -167,37 +177,43 @@ sessions = {
   { session_id = "session:notes", label = "notes" },
   { session_id = "session:empty", label = "empty" },
 }
+local function tiled(layout, blocks)
+  return { { kind = "floating", blocks = {} }, { kind = "tiled", layout = layout, blocks = blocks } }
+end
+local function block(id, label, flavor)
+  return { block_id = id, label = label or "shell", flavor = flavor or "com.superlogical.terminal.shell" }
+end
 views["session:api"] = {
   label = "api",
   active_window_id = "window:run",
   windows = {
-    { window_id = "window:edit", label = "editor", layout = { block = { block_id = "b1", label = "editor" } } },
+    { window_id = "window:edit", label = "editor", layers = tiled({ block_id = "b1" }, { block("b1", "editor") }) },
     {
       window_id = "window:run",
-      label = "runtime",
-      layout = { split = {
+      label = "Window 0a1b2c3d",
+      layers = tiled({ split = {
         direction = "vertical", ratio = 0.7,
         before = { split = {
           direction = "horizontal", ratio = 0.4,
-          before = { block = { block_id = "b2" } },
-          after = { block = { block_id = "b3" } },
+          before = { block_id = "b2" },
+          after = { block_id = "b3" },
         } },
-        after = { block = { block_id = "b4" } },
-      } },
+        after = { block_id = "b4" },
+      } }, { block("b2", "server"), block("b3", "Block 0a1b2c3d"), block("b4") }),
     },
   },
-  blocks = { b2 = { block_id = "b2", label = "server" } },
 }
 views["session:notes"] = {
-  windows = { { window_id = "window:n", label = "notes", layout = { block = { block_id = "b5" } } } },
+  windows = { { window_id = "window:n", label = "notes", layers = tiled({ block_id = "b5" }, { block("b5", "web", "com.example.web") }) } },
 }
 views["session:empty"] = { windows = {} }
 terminals = {
-  b1 = { pwd = "file://host/src/my%20api", foreground = { name = "nvim", argv = { "nvim", "main.go" } } },
-  b2 = { pwd = "file://host/src/my%20api/backend", foreground = { name = "fish" } },
-  b3 = { foreground = { name = "tail", cwd = "/var/log", argv = { "tail", "-f", "app.log" } } },
-  b4 = { pwd = "/src/my api", foreground = { name = "pnpm", argv = { "pnpm", "dev" } } },
+  b1 = { pwd = "file://host/src/my%20api", foreground = { name = "nvim", pid = 1 }, ancestors = in_shell },
+  b2 = { pwd = "file://host/src/my%20api/backend", foreground = { name = "fish" }, ancestors = login },
+  b3 = { foreground = { name = "tail", cwd = "/var/log", pid = 3 }, ancestors = in_shell },
+  b4 = { pwd = "/src/my api", foreground = { name = "node", argv0 = "pnpm", pid = 4 }, ancestors = in_shell },
 }
+commands = { [1] = "nvim main.go", [3] = "tail -f app.log", [4] = "pnpm dev" }
 
 local saved = resurrect.save()
 check("saved sessions", saved.sessions, 2)
@@ -209,6 +225,7 @@ local api = snapshot.sessions[1]
 check("api label", api.label, "api")
 check("api active", api.active_window, 2)
 check("editor label", api.windows[1].label, "editor")
+check("default window label", api.windows[2].label, nil)
 check("editor block label", api.windows[1].layout.label, "editor")
 check("editor cwd", api.windows[1].layout.cwd, "/src/my api")
 check("editor command", api.windows[1].layout.command, "nvim main.go")
@@ -220,9 +237,12 @@ check("server label", run.before.before.label, "server")
 check("server cwd", run.before.before.cwd, "/src/my api/backend")
 check("shell command", run.before.before.command, nil)
 check("fallback cwd", run.before.after.cwd, "/var/log")
+check("default block label", run.before.after.label, nil)
+check("shell block label", run.after.label, nil)
 check("tail command", run.before.after.command, "tail -f app.log")
 check("unknown program", run.after.command, nil)
 check("non-terminal", snapshot.sessions[2].windows[1].layout.cwd, nil)
+check("non-terminal label", snapshot.sessions[2].windows[1].layout.label, "web")
 check("notes label", snapshot.sessions[2].label, "notes")
 
 -- Restoring skips sessions that are still open and rebuilds the rest.
