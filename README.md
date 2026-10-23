@@ -160,10 +160,10 @@ Then edit `~/.config/rex/init.lua` to fit your setup:
   shell's path, from `command -v fish`.
 - **Key:** bind any key Rex doesn't already use.
 
-Then load the file and confirm the action is there:
+Then load the file and confirm the actions are there:
 
 ```sh
-rex config check    # exists: yes, actions: 3
+rex config check    # exists: yes, actions: 4
 rex config reload
 ```
 
@@ -204,34 +204,54 @@ with `rex.bind("<key>", "session.switch")`.
 ## Saving and restoring sessions
 
 `rex/resurrect.lua` saves every Rex session to a file and brings them back
-later, like [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect).
+when you ask, like [tmux-resurrect](https://github.com/tmux-plugins/tmux-resurrect).
 The [example configuration](rex/init.example.lua) loads it and binds
-Cmd+Alt+S to save and Cmd+Alt+R to restore. It adds two actions:
+Cmd+Alt+S to save and Cmd+Alt+R to restore. Both are also in the command
+palette as "Save Sessions" and "Restore Sessions". From the CLI:
 
 ```sh
-rex do resurrect_save                      # save every session
-rex do resurrect_restore                   # restore the last save
-rex do resurrect_restore file=/path/to.json
+rex do resurrect_save                          # save every session
+rex do resurrect_restore                       # restore the last save
+rex do resurrect_restore dry_run=true          # show what restore would do
+rex do resurrect_restore session=api           # restore only the session labeled api
+rex do resurrect_list                          # list the saves, newest first
+rex do resurrect_restore file=rex_resurrect_20261023T091500.json
 ```
 
 A save records each session's label, its windows in order and which was
 active, the splits and their ratios, the window and block labels you set, and
 each terminal's directory. Labels Rex generated, such as `Window 1a2b3c4d`,
-aren't saved, so restored windows and blocks get fresh ones. Directories come from the shell's reported working directory, or
-from the foreground program when the shell reports none.
+aren't saved, so restored windows and blocks get fresh ones. Directories come
+from the shell's reported working directory, or from the foreground program
+when the shell reports none.
 
 A terminal running `vi`, `vim`, `nvim`, `emacs`, `man`, `less`, `more`,
 `tail`, `top`, or `htop` gets that command typed back in and run on restore,
-with its arguments as `ps` reports them, which drops their quoting. Every other terminal comes back as a shell in the same directory.
-Screen contents, scrollback, and floating layers aren't saved.
+with its arguments as `ps` reports them, which drops their quoting. Set
+`run_commands = false` to type the command at the prompt without running it.
+Every other terminal comes back as a shell in the same directory. Screen
+contents, scrollback, and floating layers aren't saved.
+
+Untouched sessions aren't saved: one window holding one shell, with Rex's
+labels, in your home directory, running nothing, like the session the Rex app
+creates when it starts. If there's nothing else to save, the save writes no
+file and leaves `last.json` alone, so saving right after a restart never
+replaces the sessions you meant to restore.
 
 Saves go to `~/.local/share/rex/resurrect/` (under `$XDG_DATA_HOME` when set),
 one timestamped file per save plus `last.json`, which restore reads by
-default. Old saves are never deleted. Restore skips any session whose label is
-already open, so it is safe to run more than once.
+default. A `file` without a slash is looked up there. The newest 20
+timestamped saves are kept. Saves can hold commands, so the directory and its
+files are readable only by you, and each file is written in full before it
+replaces the old one.
 
-`setup` accepts overrides for `save_action`, `restore_action`, `dir`, `shell`
-(the restored panes' shell), and `restore_programs`.
+Restore skips any session whose label is already open, so it is safe to run
+more than once. It reports what it `restored`, `skipped`, and why anything
+`failed`; one session failing doesn't stop the others.
+
+`setup` accepts overrides for `save_action`, `restore_action`, `list_action`,
+`dir`, `keep`, `shell` (the restored panes' shell), `restore_programs`, and
+`run_commands`.
 
 ## Tests
 

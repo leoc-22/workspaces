@@ -176,6 +176,7 @@ sessions = {
   { session_id = "session:api", label = "api" },
   { session_id = "session:notes", label = "notes" },
   { session_id = "session:empty", label = "empty" },
+  { session_id = "session:app", label = "amber-ridge" },
 }
 local function tiled(layout, blocks)
   return { { kind = "floating", blocks = {} }, { kind = "tiled", layout = layout, blocks = blocks } }
@@ -207,16 +208,22 @@ views["session:notes"] = {
   windows = { { window_id = "window:n", label = "notes", layers = tiled({ block_id = "b5" }, { block("b5", "web", "com.example.web") }) } },
 }
 views["session:empty"] = { windows = {} }
+-- An untouched session, like the one the Rex app creates, isn't saved.
+views["session:app"] = {
+  windows = { { window_id = "window:a", label = "Window 0a1b2c3d", layers = tiled({ block_id = "b6" }, { block("b6") }) } },
+}
 terminals = {
   b1 = { pwd = "file://host/src/my%20api", foreground = { name = "nvim", pid = 1 }, ancestors = in_shell },
   b2 = { pwd = "file://host/src/my%20api/backend", foreground = { name = "fish" }, ancestors = login },
   b3 = { foreground = { name = "tail", cwd = "/var/log", pid = 3 }, ancestors = in_shell },
+  b6 = { pwd = "file://host" .. os.getenv("HOME"), foreground = { name = "zsh" }, ancestors = login },
   b4 = { pwd = "/src/my api", foreground = { name = "node", argv0 = "pnpm", pid = 4 }, ancestors = in_shell },
 }
 commands = { [1] = "nvim main.go", [3] = "tail -f app.log", [4] = "pnpm dev" }
 
 local saved = resurrect.save()
 check("saved sessions", saved.sessions, 2)
+check("untouched left out", #resurrect.load_snapshot(saved.file).sessions, 2)
 check("saved file", saved.file:match("/rex_resurrect_%d+T%d+%.json$") ~= nil, true)
 check("last written", io.open(tmp .. "/snapshots/last.json") ~= nil, true)
 
@@ -277,6 +284,79 @@ check("shell option", find_calls("session.create")[2].initial_windows[1].layout.
   "/opt/homebrew/bin/fish")
 resurrect.config.shell = nil
 
+-- run_commands = false types programs at the prompt without running them.
+resurrect.config.run_commands = false
+reset()
+resurrect.restore(saved.file)
+check("typed only", find_calls("session.create")[1].initial_windows[1].layout.block.options.initial_input,
+  "nvim main.go")
+resurrect.config.run_commands = true
+
+-- session restores only that session; dry_run creates nothing.
+reset()
+result = resurrect.restore(nil, { session = "notes" })
+check("session filter", #find_calls("session.create"), 1)
+check("session filter label", find_calls("session.create")[1].label, "notes")
+reset()
+sessions = { { session_id = "session:notes", label = "notes" } }
+result = resurrect.restore(nil, { dry_run = true })
+check("dry run creates nothing", #find_calls("session.create"), 0)
+check("dry run restored", result.restored[1], "api")
+check("dry run skipped", result.skipped[1], "notes")
+
+-- A file name without a slash is looked up in the save directory.
+local name = saved.file:match("[^/]+$")
+reset()
+check("file by name", resurrect.restore(name).file, saved.file)
+
+-- One session failing doesn't stop the others.
+local function write(path, text)
+  local file = assert(io.open(path, "w"))
+  file:write(text)
+  file:close()
+end
+write(tmp .. "/partial.json", [[{"version": 1, "sessions": [
+  {"label": "bad", "windows": [{"layout": {"split": "vertical", "ratio": 1.5,
+    "before": {"cwd": "/"}, "after": {"cwd": "/"}}}]},
+  {"label": "good", "windows": [{"layout": {"cwd": "/"}}]}]}]])
+reset()
+result = resurrect.restore(tmp .. "/partial.json")
+check("failed", result.failed[1], "bad: split ratio must be between 0 and 1: 1.5")
+check("still restored", result.restored[1], "good")
+check("only good created", #find_calls("session.create"), 1)
+
+-- Saves are private, pruned to keep, and an empty save leaves last.json alone.
+check("file mode", sh("stat -c %a " .. shell_quote(saved.file) .. " || stat -f %Lp " .. shell_quote(saved.file)).stdout,
+  "600\n")
+check("dir mode", sh("stat -c %a " .. shell_quote(tmp .. "/snapshots") .. " || stat -f %Lp " ..
+  shell_quote(tmp .. "/snapshots")).stdout, "700\n")
+for _, stamp in ipairs({ "20000101T000000", "20000102T000000", "20000103T000000" }) do
+  write(tmp .. "/snapshots/rex_resurrect_" .. stamp .. ".json", "{}")
+end
+resurrect.config.keep = 2
+reset()
+sessions = { { session_id = "session:notes", label = "notes" } }
+views["session:notes"] = {
+  windows = { { window_id = "window:n", label = "notes", layers = tiled({ block_id = "b5" }, { block("b5", "web", "com.example.web") }) } },
+}
+resurrect.save()
+local listing = resurrect.list().snapshots
+check("pruned", #listing, 2)
+check("newest first", listing[1].file, name)
+check("list sessions", listing[1].sessions, "notes")
+check("oldest kept", listing[2].file, "rex_resurrect_20000103T000000.json")
+check("unreadable", listing[2].sessions, "(unreadable)")
+resurrect.config.keep = 20
+local before = io.open(tmp .. "/snapshots/last.json"):read("*a")
+reset()
+sessions = { { session_id = "session:app", label = "amber-ridge" } }
+views["session:app"] = {
+  windows = { { window_id = "window:a", label = "Window 0a1b2c3d", layers = tiled({ block_id = "b6" }, { block("b6") }) } },
+}
+terminals = { b6 = { pwd = "file://host" .. os.getenv("HOME"), foreground = { name = "zsh" }, ancestors = login } }
+check("nothing to save", resurrect.save().sessions, 0)
+check("last unchanged", io.open(tmp .. "/snapshots/last.json"):read("*a"), before)
+
 -- Errors.
 local function check_error(name, fn, pattern)
   reset()
@@ -284,6 +364,7 @@ local function check_error(name, fn, pattern)
   check(name, not ok and tostring(err):find(pattern, 1, true) ~= nil, true)
   check(name .. " not created", #find_calls("session.create"), 0)
 end
+check_error("unknown session", function() resurrect.restore(nil, { session = "nope" }) end, "no session labeled 'nope'")
 check_error("missing snapshot", function() resurrect.restore(tmp .. "/nope.json") end, "no saved sessions")
 local bad = assert(io.open(tmp .. "/bad.json", "w"))
 bad:write('{"sessions": []}')

@@ -17,7 +17,10 @@ local VERSION = 1
 M.config = {
   save_action = "resurrect_save",
   restore_action = "resurrect_restore",
+  list_action = "resurrect_list",
   dir = DATA_HOME .. "/rex/resurrect",
+  keep = 20, -- the number of timestamped saves kept; last.json is extra
+  run_commands = true, -- false types restored programs at the prompt without running them
   shell = nil, -- the panes' shell, such as /opt/homebrew/bin/fish; nil uses the login shell
   -- Foreground programs typed back into their terminal on restore, matching
   -- tmux-resurrect's defaults. Anything else comes back as a plain shell.
@@ -194,15 +197,63 @@ function M.save_session(session)
   return saved
 end
 
+-- Writes through a temporary file and a rename, so a failed save never
+-- leaves a partial snapshot. Snapshots hold commands, so only you can read them.
 local function write_file(path, text)
-  local file, err = io.open(path, "w")
+  local tmp = path .. ".tmp"
+  local file, err = io.open(tmp, "w")
   if file == nil then
     error(err, 0)
   end
   file:write(text)
   file:close()
+  rex.exec({ "chmod", "600", tmp })
+  local ok, rename_err = os.rename(tmp, path)
+  if not ok then
+    os.remove(tmp)
+    error(rename_err, 0)
+  end
 end
 
+local SNAPSHOT_PATTERN = "^rex_resurrect_%d+T%d+%.json$"
+
+-- Snapshot file names, oldest first. Their timestamps sort as text.
+local function snapshot_files()
+  local r = rex.exec({ "ls", "-1", M.config.dir })
+  local files = {}
+  if r == nil or not r.ok then
+    return files
+  end
+  for name in r.stdout:gmatch("[^\n]+") do
+    if name:match(SNAPSHOT_PATTERN) then
+      table.insert(files, name)
+    end
+  end
+  table.sort(files)
+  return files
+end
+
+local function prune()
+  local files = snapshot_files()
+  for i = 1, #files - M.config.keep do
+    os.remove(M.config.dir .. "/" .. files[i])
+  end
+end
+
+-- An untouched session has nothing worth restoring: one window holding one
+-- shell with Rex's labels, in the home directory, running nothing. The Rex
+-- app creates one when it starts with no sessions.
+local function untouched(saved)
+  local window = saved.windows[1]
+  if #saved.windows ~= 1 or window.label ~= nil or window.layout.split ~= nil then
+    return false
+  end
+  local block = window.layout
+  return block.label == nil and block.command == nil and (block.cwd == nil or block.cwd == HOME)
+end
+
+-- With nothing to save, last.json is left alone, so saving right after a
+-- restart doesn't replace the sessions you meant to restore.
 function M.save()
   local list, err = rex.call("session.list")
   if list == nil then
@@ -211,12 +262,15 @@ function M.save()
   local snapshot = { version = VERSION, saved_at = os.time(), sessions = {} }
   for _, session in ipairs(list.sessions or {}) do
     local saved = M.save_session(session)
-    if #saved.windows > 0 then
+    if #saved.windows > 0 and not untouched(saved) then
       table.insert(snapshot.sessions, saved)
     end
   end
+  if #snapshot.sessions == 0 then
+    return { sessions = 0, message = "nothing to save; the last save is unchanged" }
+  end
 
-  local r = rex.exec({ "mkdir", "-p", M.config.dir })
+  local r = rex.exec({ "mkdir", "-p", "-m", "700", M.config.dir })
   if r == nil or not r.ok then
     error("could not create " .. M.config.dir, 0)
   end
@@ -224,19 +278,27 @@ function M.save()
   local file = ("%s/rex_resurrect_%s.json"):format(M.config.dir, os.date("%Y%m%dT%H%M%S", snapshot.saved_at))
   write_file(file, text)
   write_file(M.config.dir .. "/last.json", text)
+  prune()
   return { file = file, sessions = #snapshot.sessions }
 end
 
 local function restore_node(node)
+  if type(node) ~= "table" then
+    error("snapshot has a missing layout", 0)
+  end
   if node.split ~= nil then
     if node.split ~= "horizontal" and node.split ~= "vertical" then
       error("unknown split direction in snapshot: " .. tostring(node.split), 0)
     end
-    return rex.layout[node.split](node.ratio or 0.5, restore_node(node.before), restore_node(node.after))
+    local ratio = node.ratio or 0.5
+    if type(ratio) ~= "number" or ratio <= 0 or ratio >= 1 then
+      error("split ratio must be between 0 and 1: " .. tostring(ratio), 0)
+    end
+    return rex.layout[node.split](ratio, restore_node(node.before), restore_node(node.after))
   end
   local options = { cwd = node.cwd, shell = M.config.shell }
   if node.command ~= nil and node.command ~= "" then
-    options.initial_input = node.command .. "\r"
+    options.initial_input = node.command .. (M.config.run_commands and "\r" or "")
   end
   return rex.layout.block{ flavor = SHELL, label = node.label, options = options }
 end
@@ -281,32 +343,75 @@ function M.load_snapshot(file)
   return snapshot
 end
 
+local function restore_session(saved)
+  local windows = {}
+  for _, window in ipairs(saved.windows or {}) do
+    table.insert(windows, { window_label = window.label, layout = restore_node(window.layout) })
+  end
+  if #windows == 0 then
+    error("it has no windows", 0)
+  end
+  local s, err = rex.call("session.create", { label = saved.label, initial_windows = windows })
+  if s == nil then
+    error(err, 0)
+  end
+  local active = s.initial_windows[saved.active_window or 1]
+  if active ~= nil then
+    focus_window(s.session_id, active.window_id)
+  end
+end
+
 -- Sessions whose label already exists are left alone, like tmux-resurrect.
-function M.restore(file)
+-- opts.session restores only the saved sessions with that label, and
+-- opts.dry_run reports what would happen without creating anything. One
+-- session failing doesn't stop the others.
+function M.restore(file, opts)
+  opts = opts or {}
+  if file ~= nil and not file:find("/") then
+    file = M.config.dir .. "/" .. file
+  end
   file = file or (M.config.dir .. "/last.json")
   local snapshot = M.load_snapshot(file)
   local labels = existing_labels()
-  local restored, skipped = {}, {}
+  local result = { file = file, restored = {}, skipped = {}, failed = {}, dry_run = opts.dry_run or nil }
+  local matched = false
   for _, saved in ipairs(snapshot.sessions) do
-    if saved.label ~= nil and labels[saved.label] then
-      table.insert(skipped, saved.label)
-    else
-      local windows = {}
-      for _, window in ipairs(saved.windows or {}) do
-        table.insert(windows, { window_label = window.label, layout = restore_node(window.layout) })
+    if opts.session == nil or saved.label == opts.session then
+      matched = true
+      local label = saved.label or "(unlabeled)"
+      if saved.label ~= nil and labels[saved.label] then
+        table.insert(result.skipped, label)
+      elseif opts.dry_run then
+        table.insert(result.restored, label)
+      else
+        local ok, err = pcall(restore_session, saved)
+        if ok then
+          table.insert(result.restored, label)
+        else
+          table.insert(result.failed, label .. ": " .. tostring(err))
+        end
       end
-      local s, err = rex.call("session.create", { label = saved.label, initial_windows = windows })
-      if s == nil then
-        error(err, 0)
-      end
-      local active = s.initial_windows[saved.active_window or 1]
-      if active ~= nil then
-        focus_window(s.session_id, active.window_id)
-      end
-      table.insert(restored, saved.label or s.session_id)
     end
   end
-  return { file = file, restored = restored, skipped = skipped }
+  if not matched then
+    error(("no session labeled '%s' in %s"):format(opts.session, file), 0)
+  end
+  return result
+end
+
+-- Lists the saves, newest first, with the sessions in each.
+function M.list()
+  local files = snapshot_files()
+  local snapshots = {}
+  for i = #files, 1, -1 do
+    local ok, snapshot = pcall(M.load_snapshot, M.config.dir .. "/" .. files[i])
+    local labels = {}
+    for _, saved in ipairs(ok and snapshot.sessions or {}) do
+      table.insert(labels, saved.label or "(unlabeled)")
+    end
+    table.insert(snapshots, { file = files[i], sessions = ok and table.concat(labels, ", ") or "(unreadable)" })
+  end
+  return { dir = M.config.dir, snapshots = snapshots }
 end
 
 function M.setup(opts)
@@ -327,9 +432,18 @@ function M.setup(opts)
     title = "Restore Sessions",
     description = "Recreate the saved sessions that aren't already open.",
     keywords = "resurrect restore sessions snapshot",
-    args = { file = "string?" },
+    args = { file = "string?", session = "string?", dry_run = "boolean?" },
     run = function(_, args)
-      return M.restore(args.file)
+      return M.restore(args.file, { session = args.session, dry_run = args.dry_run })
+    end,
+  }
+  rex.action{
+    name = M.config.list_action,
+    title = "List Saved Sessions",
+    description = "List the saved snapshots, newest first, with the sessions in each.",
+    keywords = "resurrect list snapshots",
+    run = function()
+      return M.list()
     end,
   }
 end
